@@ -387,6 +387,99 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
+.live-status-line.with-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.live-status-text {
+  min-width: 0;
+  flex: 1 1 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-status-progress-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: min(320px, 100%);
+  flex: 0 1 320px;
+}
+
+.live-progress-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  background: #c2dce3;
+  overflow: hidden;
+}
+
+.live-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #0d6d7f, #27a6bf);
+  transition: width 0.2s ease;
+}
+
+.live-progress-percent {
+  min-width: 44px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-history {
+  border: 1px solid #d7e6eb;
+  background: #f7fcfe;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.status-history-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #3d6470;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.status-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.status-history-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.status-history-time {
+  color: #5b7b85;
+  min-width: 72px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-history-message {
+  color: #1c3f4a;
+  word-break: break-word;
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -399,5 +492,10 @@ button:disabled {
 
   .form-grid.three {
     grid-template-columns: 1fr;
+  }
+
+  .live-status-progress-inline {
+    flex-basis: 100%;
+    width: 100%;
   }
 }

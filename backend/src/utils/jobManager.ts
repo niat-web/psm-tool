@@ -9,19 +9,31 @@ export class JobCancelledError extends Error {
   }
 }
 
+export type JobProgress = {
+  percent: number;
+  loadedBytes?: number;
+  totalBytes?: number;
+};
+
 export type JobRecord<T = unknown> = {
   id: string;
   state: JobState;
   message: string;
   result?: T;
   partialResult?: T;
+  progress?: JobProgress;
   error?: string;
   cancelRequested: boolean;
   createdAt: string;
   updatedAt: string;
 };
 
-type JobUpdateCallback<T> = (message: string, partialResult?: T) => void;
+export type JobUpdatePayload<T> = {
+  partialResult?: T;
+  progress?: JobProgress | null;
+};
+
+type JobUpdateCallback<T> = (message: string, payload?: JobUpdatePayload<T>) => void;
 
 type JobRunnerControl = {
   isCancelled: () => boolean;
@@ -62,15 +74,22 @@ export const createJob = <T>(
 
   jobs.set(id, initial);
 
-  const update: JobUpdateCallback<T> = (message, partialResult) => {
+  const update: JobUpdateCallback<T> = (message, payload) => {
     const current = jobs.get(id) as JobRecord<T> | undefined;
     if (!current) return;
     if (current.state === "cancelled") return;
 
     current.message = message;
-    if (partialResult !== undefined) {
-      current.partialResult = partialResult;
+    if (payload?.partialResult !== undefined) {
+      current.partialResult = payload.partialResult;
     }
+
+    if (payload && "progress" in payload) {
+      current.progress = payload.progress ?? undefined;
+    } else {
+      current.progress = undefined;
+    }
+
     current.updatedAt = nowIso();
     if (current.state === "queued") {
       current.state = "running";
@@ -95,12 +114,14 @@ export const createJob = <T>(
     if (current.cancelRequested) {
       current.state = "cancelled";
       current.message = "Cancelled by user.";
+      current.progress = undefined;
       current.updatedAt = nowIso();
       return;
     }
 
     current.state = "running";
     current.message = "Started...";
+    current.progress = undefined;
     current.updatedAt = nowIso();
 
     try {
@@ -110,6 +131,7 @@ export const createJob = <T>(
       if (done.cancelRequested || done.state === "cancelled") {
         done.state = "cancelled";
         done.message = "Cancelled by user.";
+        done.progress = undefined;
         done.updatedAt = nowIso();
         return;
       }
@@ -118,6 +140,7 @@ export const createJob = <T>(
       done.result = result;
       done.partialResult = result;
       done.message = "Completed.";
+      done.progress = undefined;
       done.updatedAt = nowIso();
     } catch (error) {
       const failed = jobs.get(id) as JobRecord<T> | undefined;
@@ -125,6 +148,7 @@ export const createJob = <T>(
       if (failed.cancelRequested || failed.state === "cancelled" || error instanceof JobCancelledError) {
         failed.state = "cancelled";
         failed.message = "Cancelled by user.";
+        failed.progress = undefined;
         failed.updatedAt = nowIso();
         return;
       }
@@ -132,6 +156,7 @@ export const createJob = <T>(
       failed.state = "error";
       failed.error = String(error);
       failed.message = failed.error;
+      failed.progress = undefined;
       failed.updatedAt = nowIso();
     }
   })();
@@ -155,6 +180,7 @@ export const cancelJob = (id: string): JobRecord | null => {
   job.cancelRequested = true;
   job.state = "cancelled";
   job.message = "Cancelled by user.";
+  job.progress = undefined;
   job.updatedAt = nowIso();
   return job;
 };

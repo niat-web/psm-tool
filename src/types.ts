@@ -13,6 +13,12 @@ export type ApiResult = {
 
 export type JobState = "queued" | "running" | "success" | "error" | "cancelled";
 
+export type JobProgress = {
+  percent: number;
+  loadedBytes?: number;
+  totalBytes?: number;
+};
+
 export type StartJobResponse = {
   jobId: string;
 };
@@ -23,6 +29,7 @@ export type JobStatusResponse = {
   message: string;
   result?: ApiResult;
   partialResult?: ApiResult;
+  progress?: JobProgress;
   error?: string;
   cancelRequested?: boolean;
   createdAt: string;

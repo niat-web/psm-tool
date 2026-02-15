@@ -3,6 +3,7 @@ import path from "node:path";
 import { google } from "googleapis";
 import { GSHEET_ID, getServiceAccountCredentials } from "../config";
 import { ensureDir } from "./fs";
+import type { JobProgress } from "./jobManager";
 
 const DEFAULT_SHEETS_SCOPES = [
   "https://www.googleapis.com/auth/spreadsheets",
@@ -59,6 +60,11 @@ const ensureSheetExists = async (sheets: ReturnType<typeof google.sheets>, sheet
 
 const normalizeRows = (rows: Record<string, unknown>[], headers: string[]): string[][] => {
   return rows.map((row) => headers.map((header) => String(row[header] ?? "N/A")));
+};
+
+const toPositiveNumber = (value: unknown): number | null => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 };
 
 export const appendRowsWithHeaders = async (args: {
@@ -118,7 +124,13 @@ export const appendRowsWithHeaders = async (args: {
   }
 };
 
-export const downloadDriveFileToPath = async (fileId: string, outputPath: string): Promise<string> => {
+type DownloadProgressCallback = (progress: JobProgress) => void;
+
+export const downloadDriveFileToPath = async (
+  fileId: string,
+  outputPath: string,
+  onProgress?: DownloadProgressCallback,
+): Promise<string> => {
   const drive = getDrive();
   if (!drive) {
     return "Credentials Error";
@@ -126,21 +138,77 @@ export const downloadDriveFileToPath = async (fileId: string, outputPath: string
 
   try {
     ensureDir(path.dirname(outputPath));
+    let totalBytes: number | null = null;
+
+    try {
+      const metadata = await drive.files.get({
+        fileId,
+        fields: "size",
+        supportsAllDrives: true,
+      });
+      totalBytes = toPositiveNumber(metadata.data.size);
+    } catch {
+      totalBytes = null;
+    }
 
     const response = await drive.files.get(
       {
         fileId,
         alt: "media",
+        supportsAllDrives: true,
       },
       {
         responseType: "stream",
       },
     );
 
+    if (!totalBytes) {
+      const headerLength = response.headers?.["content-length"];
+      totalBytes = Array.isArray(headerLength)
+        ? toPositiveNumber(headerLength[0])
+        : toPositiveNumber(headerLength);
+    }
+
+    let loadedBytes = 0;
+    let lastEmittedPercent = -1;
+    const emitProgress = (force = false): void => {
+      if (!onProgress) return;
+      const percent = totalBytes
+        ? Math.min(100, Math.round((loadedBytes / totalBytes) * 100))
+        : loadedBytes > 0
+          ? 0
+          : 0;
+
+      if (!force && percent === lastEmittedPercent) {
+        return;
+      }
+
+      lastEmittedPercent = percent;
+      onProgress({
+        percent,
+        loadedBytes,
+        totalBytes: totalBytes ?? undefined,
+      });
+    };
+
+    emitProgress(true);
+
     await new Promise<void>((resolve, reject) => {
       const stream = fs.createWriteStream(outputPath);
+      stream.on("error", (error: unknown) => reject(error));
+      stream.on("finish", () => {
+        if (totalBytes && loadedBytes < totalBytes) {
+          loadedBytes = totalBytes;
+        }
+        emitProgress(true);
+        resolve();
+      });
+
       response.data
-        .on("end", () => resolve())
+        .on("data", (chunk: Buffer) => {
+          loadedBytes += chunk.length;
+          emitProgress();
+        })
         .on("error", (error: unknown) => reject(error))
         .pipe(stream);
     });

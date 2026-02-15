@@ -10,18 +10,78 @@ import type {
   VideoUploaderMetadata,
 } from "../types";
 
-const API_BASE = process.env.REACT_APP_API_URL ?? "http://localhost:4000/api";
+const normalizeApiBase = (value: string): string => value.replace(/\/+$/, "");
 
-const assertResponse = async (response: Response): Promise<Response> => {
+const resolveApiBase = (): string => {
+  const configured = process.env.REACT_APP_API_URL?.trim();
+  if (configured) {
+    return normalizeApiBase(configured);
+  }
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "http://localhost:4000/api";
+    }
+  }
+
+  return "/api";
+};
+
+const API_BASE = resolveApiBase();
+const DEFAULT_TIMEOUT_MS = 60_000;
+const CONFIG_TIMEOUT_MS = 10_000;
+
+const toApiUrl = (path: string): string => `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
+
+const fetchWithTimeout = async (
+  url: string,
+  init?: RequestInit,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const assertResponse = async (response: Response, url: string): Promise<Response> => {
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `${response.status} ${response.statusText}`);
+    throw new Error(
+      text || `API request failed (${response.status} ${response.statusText}) for ${url}`,
+    );
   }
   return response;
 };
 
+const parseJson = async <T>(response: Response, url: string): Promise<T> => {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const preview = (await response.text()).slice(0, 160);
+    throw new Error(
+      `Expected JSON from API but received "${contentType || "unknown"}" for ${url}. Response starts with: ${preview}`,
+    );
+  }
+
+  return response.json() as Promise<T>;
+};
+
 const postJson = async <T>(path: string, payload: unknown): Promise<T> => {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const url = toApiUrl(path);
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -29,28 +89,31 @@ const postJson = async <T>(path: string, payload: unknown): Promise<T> => {
     body: JSON.stringify(payload),
   });
 
-  await assertResponse(response);
-  return response.json() as Promise<T>;
+  await assertResponse(response, url);
+  return parseJson<T>(response, url);
 };
 
 export const fetchAppConfig = async (): Promise<AppConfig> => {
-  const response = await fetch(`${API_BASE}/app-config`);
-  await assertResponse(response);
-  return response.json() as Promise<AppConfig>;
+  const url = toApiUrl("/app-config");
+  const response = await fetchWithTimeout(url, undefined, CONFIG_TIMEOUT_MS);
+  await assertResponse(response, url);
+  return parseJson<AppConfig>(response, url);
 };
 
 export const fetchJobStatus = async (jobId: string): Promise<JobStatusResponse> => {
-  const response = await fetch(`${API_BASE}/jobs/${jobId}`);
-  await assertResponse(response);
-  return response.json() as Promise<JobStatusResponse>;
+  const url = toApiUrl(`/jobs/${jobId}`);
+  const response = await fetchWithTimeout(url);
+  await assertResponse(response, url);
+  return parseJson<JobStatusResponse>(response, url);
 };
 
 export const cancelJob = async (jobId: string): Promise<JobStatusResponse> => {
-  const response = await fetch(`${API_BASE}/jobs/${jobId}/cancel`, {
+  const url = toApiUrl(`/jobs/${jobId}/cancel`);
+  const response = await fetchWithTimeout(url, {
     method: "POST",
   });
-  await assertResponse(response);
-  return response.json() as Promise<JobStatusResponse>;
+  await assertResponse(response, url);
+  return parseJson<JobStatusResponse>(response, url);
 };
 
 export const analyzeInterviewRows = (rows: InterviewInputRow[], product: string): Promise<ApiResult> => {
@@ -74,13 +137,14 @@ export const analyzeVideoUploader = async (args: {
   formData.append("product", args.product);
   formData.append("video", args.file);
 
-  const response = await fetch(`${API_BASE}/interview/video-uploader`, {
+  const url = toApiUrl("/interview/video-uploader");
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
   });
 
-  await assertResponse(response);
-  return response.json() as Promise<ApiResult>;
+  await assertResponse(response, url);
+  return parseJson<ApiResult>(response, url);
 };
 
 export const startVideoUploaderJob = async (args: {
@@ -93,13 +157,14 @@ export const startVideoUploaderJob = async (args: {
   formData.append("product", args.product);
   formData.append("video", args.file);
 
-  const response = await fetch(`${API_BASE}/interview/video-uploader/start`, {
+  const url = toApiUrl("/interview/video-uploader/start");
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
   });
 
-  await assertResponse(response);
-  return response.json() as Promise<StartJobResponse>;
+  await assertResponse(response, url);
+  return parseJson<StartJobResponse>(response, url);
 };
 
 export const analyzeDrilldownRows = (rows: Array<Record<string, string>>, product: string): Promise<ApiResult> => {
@@ -151,13 +216,14 @@ export const analyzeAssessmentsZip = async (
     }
   }
 
-  const response = await fetch(`${API_BASE}/assessments/zip`, {
+  const url = toApiUrl("/assessments/zip");
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
   });
 
-  await assertResponse(response);
-  return response.json() as Promise<ApiResult>;
+  await assertResponse(response, url);
+  return parseJson<ApiResult>(response, url);
 };
 
 export const startAssessmentsZipJob = async (
@@ -184,13 +250,14 @@ export const startAssessmentsZipJob = async (
     }
   }
 
-  const response = await fetch(`${API_BASE}/assessments/zip/start`, {
+  const url = toApiUrl("/assessments/zip/start");
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
   });
 
-  await assertResponse(response);
-  return response.json() as Promise<StartJobResponse>;
+  await assertResponse(response, url);
+  return parseJson<StartJobResponse>(response, url);
 };
 
 export const analyzeAssessmentsIndividual = async (
@@ -217,13 +284,14 @@ export const analyzeAssessmentsIndividual = async (
     }
   }
 
-  const response = await fetch(`${API_BASE}/assessments/individual`, {
+  const url = toApiUrl("/assessments/individual");
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
   });
 
-  await assertResponse(response);
-  return response.json() as Promise<ApiResult>;
+  await assertResponse(response, url);
+  return parseJson<ApiResult>(response, url);
 };
 
 export const startAssessmentsIndividualJob = async (
@@ -250,13 +318,14 @@ export const startAssessmentsIndividualJob = async (
     }
   }
 
-  const response = await fetch(`${API_BASE}/assessments/individual/start`, {
+  const url = toApiUrl("/assessments/individual/start");
+  const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
   });
 
-  await assertResponse(response);
-  return response.json() as Promise<StartJobResponse>;
+  await assertResponse(response, url);
+  return parseJson<StartJobResponse>(response, url);
 };
 
 export const getDrilldownSampleTemplateUrl = (): string => {

@@ -7,6 +7,7 @@ import { forceEnumFormat } from "../utils/enum";
 import { ensureDirs, readTextFileIfExists, safeRemoveFile, writeTextFile } from "../utils/fs";
 import { createPublicGist } from "../utils/gist";
 import { appendRowsWithHeaders, downloadDriveFileToPath } from "../utils/google";
+import type { JobProgress, JobUpdatePayload } from "../utils/jobManager";
 import {
   checkFfmpegInstalled,
   cleanTranscriptHallucinations,
@@ -62,7 +63,7 @@ const CLASSIFY_FIELDS = [
 const nowDateTime = (): string => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 type InterviewAnalysisResult = { rows: Array<Record<string, string>>; savedToSheet: boolean };
-type StatusUpdateCallback = (message: string, partialResult?: InterviewAnalysisResult) => void;
+type StatusUpdateCallback = (message: string, payload?: JobUpdatePayload<InterviewAnalysisResult>) => void;
 type ProcessInterviewRowResult = { rows: Array<Record<string, string>>; cleanupPaths: string[] };
 
 const cleanupFiles = (paths: string[]): void => {
@@ -249,7 +250,78 @@ const generateTranscript = async (
   writeTextFile(outputPath, cleaned);
 };
 
-const downloadViaPublicDrive = async (fileId: string, outputPath: string): Promise<boolean> => {
+const toPositiveNumber = (value: unknown): number | null => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const downloadFetchResponseToPath = async (
+  response: Response,
+  outputPath: string,
+  onProgress?: (progress: JobProgress) => void,
+): Promise<boolean> => {
+  if (!response.body) {
+    return false;
+  }
+
+  const totalBytes = toPositiveNumber(response.headers.get("content-length"));
+  let loadedBytes = 0;
+  let lastPercent = -1;
+  const emitProgress = (force = false): void => {
+    if (!onProgress) return;
+    const percent = totalBytes
+      ? Math.min(100, Math.round((loadedBytes / totalBytes) * 100))
+      : loadedBytes > 0
+        ? 0
+        : 0;
+    if (!force && percent === lastPercent) {
+      return;
+    }
+    lastPercent = percent;
+    onProgress({
+      percent,
+      loadedBytes,
+      totalBytes: totalBytes ?? undefined,
+    });
+  };
+
+  emitProgress(true);
+
+  const reader = response.body.getReader();
+  const output = await fs.promises.open(outputPath, "w");
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      if (!value || value.byteLength === 0) {
+        continue;
+      }
+
+      loadedBytes += value.byteLength;
+      await output.write(value);
+      emitProgress();
+    }
+
+    if (totalBytes && loadedBytes < totalBytes) {
+      loadedBytes = totalBytes;
+    }
+    emitProgress(true);
+  } finally {
+    reader.releaseLock();
+    await output.close();
+  }
+
+  return true;
+};
+
+const downloadViaPublicDrive = async (
+  fileId: string,
+  outputPath: string,
+  onProgress?: (progress: JobProgress) => void,
+): Promise<boolean> => {
   const url = `https://drive.google.com/uc?export=download&id=${fileId}`;
 
   try {
@@ -271,14 +343,10 @@ const downloadViaPublicDrive = async (fileId: string, outputPath: string): Promi
       if (!confirmResponse.ok) {
         return false;
       }
-      const buffer = Buffer.from(await confirmResponse.arrayBuffer());
-      fs.writeFileSync(outputPath, buffer);
-      return true;
+      return downloadFetchResponseToPath(confirmResponse, outputPath, onProgress);
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    fs.writeFileSync(outputPath, buffer);
-    return true;
+    return downloadFetchResponseToPath(response, outputPath, onProgress);
   } catch {
     return false;
   }
@@ -442,15 +510,26 @@ const processInterviewRow = async (args: {
 
   if (!fs.existsSync(videoPath)) {
     args.abortIfCancelled?.();
-    args.onStatus?.(`${candidatePrefix}: downloading video...`);
-    const publicDownloadOk = await downloadViaPublicDrive(fileId, videoPath);
+    args.onStatus?.(`${candidatePrefix}: downloading video...`, { progress: { percent: 0 } });
+    const publicDownloadOk = await downloadViaPublicDrive(fileId, videoPath, (progress) => {
+      args.onStatus?.(`${candidatePrefix}: downloading video...`, { progress });
+    });
     args.abortIfCancelled?.();
     videoValidation = validateVideoFile(videoPath);
 
     if (!publicDownloadOk || !videoValidation.ok) {
       if (fs.existsSync(videoPath)) safeRemoveFile(videoPath);
-      args.onStatus?.(`${candidatePrefix}: trying Drive API download...`);
-      const driveResult = await downloadDriveFileToPath(fileId, videoPath);
+      const fallbackReason = !publicDownloadOk
+        ? "public download request failed"
+        : `downloaded file invalid (${videoValidation.reason})`;
+      args.onStatus?.(
+        `${candidatePrefix}: public download failed (${fallbackReason}), switching to Drive API...`,
+        { progress: { percent: 0 } },
+      );
+      args.onStatus?.(`${candidatePrefix}: trying Drive API download...`, { progress: { percent: 0 } });
+      const driveResult = await downloadDriveFileToPath(fileId, videoPath, (progress) => {
+        args.onStatus?.(`${candidatePrefix}: trying Drive API download...`, { progress });
+      });
       args.abortIfCancelled?.();
       if (driveResult !== "Success") {
         safeRemoveFile(videoPath);
@@ -587,8 +666,10 @@ export const runInterviewAnalyzer = async (args: {
     finalRows.push(...processed.rows);
     cleanupPaths.push(...processed.cleanupPaths);
     args.onStatus?.(`Candidate ${rowIndex}/${totalRows}: completed.`, {
-      rows: ensureHeaderOrder(finalRows),
-      savedToSheet: false,
+      partialResult: {
+        rows: ensureHeaderOrder(finalRows),
+        savedToSheet: false,
+      },
     });
   }
 

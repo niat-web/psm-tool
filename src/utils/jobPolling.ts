@@ -27,6 +27,16 @@ const throwIfAborted = (signal?: AbortSignal): void => {
   }
 };
 
+const isTransientGatewayError = (error: unknown): boolean => {
+  const message = String(error ?? "");
+  return (
+    message.includes("504 Gateway Time-out") ||
+    message.includes("504 Gateway Timeout") ||
+    message.includes("502 Bad Gateway") ||
+    message.includes("upstream timed out")
+  );
+};
+
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     const onAbort = (): void => {
@@ -59,9 +69,25 @@ export const waitForJobCompletion = async (
   pollIntervalMs = 1200,
   options?: { signal?: AbortSignal },
 ): Promise<ApiResult> => {
+  let transientGatewayFailures = 0;
+
   for (;;) {
     throwIfAborted(options?.signal);
-    const status = await fetchJobStatus(jobId);
+    let status: JobStatusResponse;
+    try {
+      status = await fetchJobStatus(jobId);
+      transientGatewayFailures = 0;
+    } catch (error) {
+      if (isTransientGatewayError(error)) {
+        transientGatewayFailures += 1;
+        if (transientGatewayFailures <= 10) {
+          await sleep(pollIntervalMs, options?.signal);
+          continue;
+        }
+      }
+      throw error;
+    }
+
     onUpdate(status);
 
     if (status.state === "success") {
