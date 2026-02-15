@@ -92,3 +92,14 @@ Provide ONLY the raw JSON array. No markdown.
     "curriculum_coverage": "COVERED"
   }
 ]
+
+### 5. STRICT GROUNDING RULES (MANDATORY)
+- tech_stacks, topic, sub_topic must be derived from question_text only.
+- Do NOT use answer_text to assign tech_stacks/topic/sub_topic.
+- answer_text may be used only for relevancy_score.
+- If question_text is generic learning-progress (e.g., "latest topic you covered"),
+  use:
+  - tech_stacks = GENERAL (or broad stack named in question, e.g., JAVASCRIPT)
+  - topic = LEARNING_PROGRESS
+  - sub_topic = N/A
+- If a concept appears only in answer_text and not in question_text, do not use it.
