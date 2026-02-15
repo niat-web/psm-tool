@@ -1,0 +1,5 @@
+
+> sample@0.1.0 start:server
+> tsx backend/src/server.ts
+
+Backend server running on http://localhost:4000
