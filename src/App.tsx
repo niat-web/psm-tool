@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchAppConfig } from "./api/client";
 import { AssignmentsPage } from "./pages/AssignmentsPage";
 import { AssessmentsPage } from "./pages/AssessmentsPage";
+import { DocumentationPage } from "./pages/DocumentationPage";
 import { DrilldownPage } from "./pages/DrilldownPage";
 import { InterviewPage } from "./pages/InterviewPage";
 import type { AppConfig } from "./types";
@@ -25,12 +26,20 @@ const fallbackConfig: AppConfig = {
 };
 
 export default function App() {
+  const normalizedPath = window.location.pathname.replace(/\/+$/, "") || "/";
+  const isDocumentationRoute =
+    normalizedPath === "/documentation" || window.location.hash === "#/documentation";
+
   const [config, setConfig] = useState<AppConfig>(fallbackConfig);
   const [selectedProduct, setSelectedProduct] = useState<string>(fallbackConfig.productOptions[0]);
   const [selectedPage, setSelectedPage] = useState<string>(fallbackConfig.pages[0]);
   const [loadingConfig, setLoadingConfig] = useState(false);
 
   useEffect(() => {
+    if (isDocumentationRoute) {
+      return;
+    }
+
     const loadConfig = async (): Promise<void> => {
       try {
         setLoadingConfig(true);
@@ -46,7 +55,7 @@ export default function App() {
     };
 
     void loadConfig();
-  }, []);
+  }, [isDocumentationRoute]);
 
   const pageContent = useMemo(() => {
     if (selectedPage === "Drilldown") {
@@ -63,6 +72,10 @@ export default function App() {
 
     return <InterviewPage product={selectedProduct} modules={config.interviewModules} />;
   }, [config.interviewModules, selectedPage, selectedProduct]);
+
+  if (isDocumentationRoute) {
+    return <DocumentationPage />;
+  }
 
   return (
     <div className="app-shell">
@@ -102,7 +115,7 @@ export default function App() {
         <div className="sidebar-bottom">
           <a
             className="doc-link-button"
-            href="https://dour-blade-da4.notion.site/PsmTool-305573730b5a80c981a3dfac803322d4?source=copy_link"
+            href="/#/documentation"
             target="_blank"
             rel="noreferrer noopener"
           >
