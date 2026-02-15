@@ -9,7 +9,7 @@ import type { AppConfig } from "./types";
 import "./App.css";
 
 const fallbackConfig: AppConfig = {
-  appName: "Integrated Analyst Tool",
+  appName: "",
   version: "Integrated Pipeline v2.0",
   productOptions: [
     "Intensive",
@@ -80,7 +80,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <h1>Navigation</h1>
+        <h1>Psm Analyser Tool</h1>
 
         <label className="sidebar-label" htmlFor="product-select">
           Product

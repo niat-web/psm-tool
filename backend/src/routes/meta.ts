@@ -8,7 +8,7 @@ router.get("/app-config", (_req, res) => {
     productOptions: PRODUCT_OPTIONS,
     pages: ["Interview analyser", "Drilldown", "Assessments", "Assignments"],
     interviewModules: ["Interview_analyser", "Video_uploader"],
-    appName: "Integrated Analyst Tool",
+    appName: "",
     version: "Integrated Pipeline v2.0",
   });
 });
