@@ -31,6 +31,9 @@ const resolveApiBase = (): string => {
 const API_BASE = resolveApiBase();
 const DEFAULT_TIMEOUT_MS = 60_000;
 const CONFIG_TIMEOUT_MS = 10_000;
+const JOB_STATUS_TIMEOUT_MS = 20_000;
+const JOB_CONTROL_TIMEOUT_MS = 20_000;
+const START_REQUEST_TIMEOUT_MS = 300_000;
 
 const toApiUrl = (path: string): string => `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
 
@@ -79,7 +82,11 @@ const parseJson = async <T>(response: Response, url: string): Promise<T> => {
   return response.json() as Promise<T>;
 };
 
-const postJson = async <T>(path: string, payload: unknown): Promise<T> => {
+const postJson = async <T>(
+  path: string,
+  payload: unknown,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<T> => {
   const url = toApiUrl(path);
   const response = await fetchWithTimeout(url, {
     method: "POST",
@@ -87,7 +94,7 @@ const postJson = async <T>(path: string, payload: unknown): Promise<T> => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
-  });
+  }, timeoutMs);
 
   await assertResponse(response, url);
   return parseJson<T>(response, url);
@@ -102,7 +109,7 @@ export const fetchAppConfig = async (): Promise<AppConfig> => {
 
 export const fetchJobStatus = async (jobId: string): Promise<JobStatusResponse> => {
   const url = toApiUrl(`/jobs/${jobId}`);
-  const response = await fetchWithTimeout(url);
+  const response = await fetchWithTimeout(url, undefined, JOB_STATUS_TIMEOUT_MS);
   await assertResponse(response, url);
   return parseJson<JobStatusResponse>(response, url);
 };
@@ -111,7 +118,7 @@ export const cancelJob = async (jobId: string): Promise<JobStatusResponse> => {
   const url = toApiUrl(`/jobs/${jobId}/cancel`);
   const response = await fetchWithTimeout(url, {
     method: "POST",
-  });
+  }, JOB_CONTROL_TIMEOUT_MS);
   await assertResponse(response, url);
   return parseJson<JobStatusResponse>(response, url);
 };
@@ -124,7 +131,11 @@ export const startInterviewAnalyzerJob = (
   rows: InterviewInputRow[],
   product: string,
 ): Promise<StartJobResponse> => {
-  return postJson<StartJobResponse>("/interview/analyzer/start", { rows, product });
+  return postJson<StartJobResponse>(
+    "/interview/analyzer/start",
+    { rows, product },
+    START_REQUEST_TIMEOUT_MS,
+  );
 };
 
 export const analyzeVideoUploader = async (args: {
@@ -161,7 +172,7 @@ export const startVideoUploaderJob = async (args: {
   const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
-  });
+  }, START_REQUEST_TIMEOUT_MS);
 
   await assertResponse(response, url);
   return parseJson<StartJobResponse>(response, url);
@@ -175,7 +186,11 @@ export const startDrilldownJob = (
   rows: Array<Record<string, string>>,
   product: string,
 ): Promise<StartJobResponse> => {
-  return postJson<StartJobResponse>("/drilldown/analyze/start", { rows, product });
+  return postJson<StartJobResponse>(
+    "/drilldown/analyze/start",
+    { rows, product },
+    START_REQUEST_TIMEOUT_MS,
+  );
 };
 
 export const analyzeAssignmentsRows = (
@@ -189,7 +204,11 @@ export const startAssignmentsJob = (
   rows: AssignmentInputRow[],
   product: string,
 ): Promise<StartJobResponse> => {
-  return postJson<StartJobResponse>("/assignments/analyze/start", { rows, product });
+  return postJson<StartJobResponse>(
+    "/assignments/analyze/start",
+    { rows, product },
+    START_REQUEST_TIMEOUT_MS,
+  );
 };
 
 export const analyzeAssessmentsZip = async (
@@ -254,7 +273,7 @@ export const startAssessmentsZipJob = async (
   const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
-  });
+  }, START_REQUEST_TIMEOUT_MS);
 
   await assertResponse(response, url);
   return parseJson<StartJobResponse>(response, url);
@@ -322,7 +341,7 @@ export const startAssessmentsIndividualJob = async (
   const response = await fetchWithTimeout(url, {
     method: "POST",
     body: formData,
-  });
+  }, START_REQUEST_TIMEOUT_MS);
 
   await assertResponse(response, url);
   return parseJson<StartJobResponse>(response, url);

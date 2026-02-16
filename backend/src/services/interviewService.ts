@@ -469,6 +469,7 @@ const saveQaCsv = (filePath: string, rows: Array<Record<string, string>>): void 
 
 const processInterviewRow = async (args: {
   row: InterviewInputRow;
+  runToken: string;
   qnaPrompt: string;
   classifyPrompt: string;
   product: string;
@@ -559,7 +560,9 @@ const processInterviewRow = async (args: {
     endTime = duration;
   }
 
-  const baseName = `${fileId}_${Math.floor(startTime)}_${Math.floor(endTime)}`;
+  const baseName =
+    `${fileId}_${Math.floor(startTime)}_${Math.floor(endTime)}_` +
+    `${args.runToken}_${args.rowIndex}`;
   const audioPath = path.join(APP_DIRS.downloadedVideos, `${baseName}.mp3`);
   const transcriptPath = path.join(APP_DIRS.generatedTranscripts, `${baseName}.txt`);
   const qnaCsvPath = path.join(APP_DIRS.qa, `${baseName}_consolidated.csv`);
@@ -620,7 +623,7 @@ const processInterviewRow = async (args: {
   saveQaCsv(qnaCsvPath, rows);
   return {
     rows,
-    cleanupPaths: [videoPath, audioPath, transcriptPath, qnaCsvPath],
+    cleanupPaths: [audioPath, transcriptPath, qnaCsvPath],
   };
 };
 
@@ -648,6 +651,7 @@ export const runInterviewAnalyzer = async (args: {
   const finalRows: Array<Record<string, string>> = [];
   const cleanupPaths: string[] = [];
   const totalRows = args.rows.length;
+  const runToken = randomUUID().replace(/-/g, "").slice(0, 12);
   let rowIndex = 0;
 
   for (const row of args.rows) {
@@ -655,6 +659,7 @@ export const runInterviewAnalyzer = async (args: {
     rowIndex += 1;
     const processed = await processInterviewRow({
       row,
+      runToken,
       qnaPrompt,
       classifyPrompt,
       product: args.product,
@@ -717,12 +722,14 @@ export const runVideoUploader = async (args: {
   const classifyPrompt = classifyTemplate.replace("{{CURRICULUM_CONTEXT}}", curriculum);
 
   const timestamp = Date.now();
+  const uploadToken = randomUUID().replace(/-/g, "").slice(0, 8);
   args.abortIfCancelled?.();
   args.onStatus?.("Saving uploaded video...");
-  const sourceVideoPath = path.join(APP_DIRS.downloadedVideos, args.uploadedFile.originalname);
+  const uploadExt = path.extname(args.uploadedFile.originalname) || ".mp4";
+  const sourceVideoPath = path.join(APP_DIRS.downloadedVideos, `uploaded_${timestamp}_${uploadToken}${uploadExt}`);
   fs.writeFileSync(sourceVideoPath, args.uploadedFile.buffer);
 
-  const baseName = `${args.metadata.user_id || "candidate"}_${timestamp}`;
+  const baseName = `${args.metadata.user_id || "candidate"}_${timestamp}_${uploadToken}`;
   const audioPath = path.join(APP_DIRS.downloadedVideos, `${baseName}.mp3`);
   const transcriptPath = path.join(APP_DIRS.generatedTranscripts, `${baseName}.txt`);
 
