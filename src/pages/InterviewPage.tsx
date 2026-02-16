@@ -35,7 +35,6 @@ type InterviewPageProps = {
 const defaultModules = ["Interview_analyser", "Video_uploader"];
 
 function InterviewAnalyzerModule({ product }: { product: string }) {
-  const MAX_STATUS_HISTORY_ITEMS = 20;
   const [inputMethod, setInputMethod] = useState<"Paste Text" | "Upload CSV">("Paste Text");
   const [pasteText, setPasteText] = useState("");
   const [rows, setRows] = useState<InterviewInputRow[]>([]);
@@ -44,27 +43,9 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveStatus, setLiveStatus] = useState("");
-  const [statusHistory, setStatusHistory] = useState<Array<{ at: string; message: string }>>([]);
   const [downloadProgress, setDownloadProgress] = useState<JobProgress | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const pollAbortRef = useRef<AbortController | null>(null);
-
-  const pushStatus = (message: string): void => {
-    const normalized = message.trim();
-    if (!normalized) return;
-
-    const at = new Date().toLocaleTimeString();
-    setStatusHistory((prev) => {
-      if (prev.length > 0 && prev[prev.length - 1].message === normalized) {
-        return prev;
-      }
-
-      const next = [...prev, { at, message: normalized }];
-      return next.length > MAX_STATUS_HISTORY_ITEMS
-        ? next.slice(next.length - MAX_STATUS_HISTORY_ITEMS)
-        : next;
-    });
-  };
 
   const previewRows = useMemo(
     () => rows.slice(0, 10).map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, String(v ?? "")]))),
@@ -129,7 +110,6 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
       setResult(null);
       const submittingMessage = "Submitting interview analyzer job...";
       setLiveStatus(submittingMessage);
-      setStatusHistory([{ at: new Date().toLocaleTimeString(), message: submittingMessage }]);
       setDownloadProgress(null);
       const started = await startInterviewAnalyzerJob(rows, product);
       setActiveJobId(started.jobId);
@@ -137,7 +117,6 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
         started.jobId,
         (status) => {
           setLiveStatus(status.message);
-          pushStatus(status.message);
           setDownloadProgress(status.progress ?? null);
           if (status.partialResult) {
             setResult(status.partialResult);
@@ -148,7 +127,6 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
       );
       setResult(response);
       setLiveStatus("Completed.");
-      pushStatus("Completed.");
       setDownloadProgress(null);
       void notifyJobCompleted({
         jobName: "Interview Analyzer",
@@ -161,13 +139,11 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
       }
       if (isJobCancelledByUserError(err)) {
         setLiveStatus("Stopped by user.");
-        pushStatus("Stopped by user.");
         setDownloadProgress(null);
         return;
       }
       void notifyJobFailed({ jobName: "Interview Analyzer", errorMessage: String(err) });
       setError(String(err));
-      pushStatus(`Failed: ${String(err)}`);
       setDownloadProgress(null);
     } finally {
       setLoading(false);
@@ -185,17 +161,14 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
 
     try {
       setLiveStatus("Stopping...");
-      pushStatus("Stopping...");
       await cancelJob(activeJobId);
       pollAbortRef.current?.abort();
       setActiveJobId(null);
       setLoading(false);
       setLiveStatus("Stopped by user.");
-      pushStatus("Stopped by user.");
       setDownloadProgress(null);
     } catch (err) {
       setError(String(err));
-      pushStatus(`Failed to stop: ${String(err)}`);
     }
   };
 
@@ -281,19 +254,6 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
               <span className="live-progress-percent">{downloadPercent}%</span>
             </div>
           )}
-        </div>
-      )}
-      {statusHistory.length > 0 && (
-        <div className="status-history">
-          <div className="status-history-title">Status history</div>
-          <ul className="status-history-list">
-            {[...statusHistory].reverse().map((entry, index) => (
-              <li className="status-history-item" key={`${entry.at}-${index}`}>
-                <span className="status-history-time">{entry.at}</span>
-                <span className="status-history-message">{entry.message}</span>
-              </li>
-            ))}
-          </ul>
         </div>
       )}
 
