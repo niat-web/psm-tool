@@ -63,6 +63,11 @@ const fetchWithTimeout = async (
 const assertResponse = async (response: Response, url: string): Promise<Response> => {
   if (!response.ok) {
     const text = await response.text();
+    if (response.status === 413) {
+      throw new Error(
+        `Payload too large for ${url}. Reduce input size or increase upload limits (Nginx client_max_body_size / backend API_BODY_LIMIT).`,
+      );
+    }
     throw new Error(
       text || `API request failed (${response.status} ${response.statusText}) for ${url}`,
     );

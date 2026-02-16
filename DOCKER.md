@@ -36,6 +36,8 @@ docker compose down
 
 - Backend image includes `ffmpeg` and `ffprobe`.
 - Frontend calls backend through Nginx proxy at `/api`.
+- Nginx upload limit is configured in `docker/nginx.conf` (`client_max_body_size`).
+- Backend JSON/form limit is configured by `API_BODY_LIMIT` in `.env`.
 - Runtime processing folders are mounted from host:
   - `DownloadedVideos`
   - `GeneratedTranscripts`
