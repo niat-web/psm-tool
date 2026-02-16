@@ -27,13 +27,18 @@ const throwIfAborted = (signal?: AbortSignal): void => {
   }
 };
 
-const isTransientGatewayError = (error: unknown): boolean => {
+const MAX_TRANSIENT_POLL_ERRORS = 30;
+
+const isTransientPollingError = (error: unknown): boolean => {
   const message = String(error ?? "");
   return (
     message.includes("504 Gateway Time-out") ||
     message.includes("504 Gateway Timeout") ||
     message.includes("502 Bad Gateway") ||
-    message.includes("upstream timed out")
+    message.includes("upstream timed out") ||
+    message.includes("Request timed out after") ||
+    message.includes("Failed to fetch") ||
+    message.includes("NetworkError when attempting to fetch resource")
   );
 };
 
@@ -69,18 +74,18 @@ export const waitForJobCompletion = async (
   pollIntervalMs = 1200,
   options?: { signal?: AbortSignal },
 ): Promise<ApiResult> => {
-  let transientGatewayFailures = 0;
+  let transientPollFailures = 0;
 
   for (;;) {
     throwIfAborted(options?.signal);
     let status: JobStatusResponse;
     try {
       status = await fetchJobStatus(jobId);
-      transientGatewayFailures = 0;
+      transientPollFailures = 0;
     } catch (error) {
-      if (isTransientGatewayError(error)) {
-        transientGatewayFailures += 1;
-        if (transientGatewayFailures <= 10) {
+      if (isTransientPollingError(error)) {
+        transientPollFailures += 1;
+        if (transientPollFailures <= MAX_TRANSIENT_POLL_ERRORS) {
           await sleep(pollIntervalMs, options?.signal);
           continue;
         }
