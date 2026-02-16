@@ -160,3 +160,40 @@
     font-size: 24px;
   }
 }
+
+@media (max-width: 480px) {
+  .docs-main {
+    padding: 12px 10px 22px;
+  }
+
+  .docs-card {
+    border-radius: 10px;
+    padding: 14px 12px;
+  }
+
+  .docs-topbar {
+    margin: -14px -12px 14px;
+    padding: 10px 12px 8px;
+  }
+
+  .docs-topbar h1 {
+    font-size: 21px;
+  }
+
+  .docs-home-link {
+    width: 100%;
+    text-align: center;
+  }
+
+  .docs-card h1 {
+    font-size: 25px;
+  }
+
+  .docs-card h2 {
+    font-size: 20px;
+  }
+
+  .docs-card h3 {
+    font-size: 17px;
+  }
+}

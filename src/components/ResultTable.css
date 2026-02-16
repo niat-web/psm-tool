@@ -49,3 +49,19 @@
   background: #f7fafc;
   color: #5d6d7d;
 }
+
+@media (max-width: 640px) {
+  .result-table {
+    font-size: 12px;
+  }
+
+  .result-table th,
+  .result-table td {
+    padding: 7px 8px;
+  }
+
+  .result-empty {
+    padding: 12px;
+    font-size: 13px;
+  }
+}

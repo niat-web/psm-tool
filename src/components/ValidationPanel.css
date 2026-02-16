@@ -63,7 +63,8 @@
 }
 
 .validation-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -83,5 +84,35 @@
 
 .validation-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+@media (max-width: 640px) {
+  .validation-panel {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .validation-header h4 {
+    font-size: 14px;
+  }
+
+  .validation-summary {
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .validation-note {
+    font-size: 11px;
+  }
+
+  .validation-table {
+    font-size: 11px;
+  }
+
+  .validation-table th,
+  .validation-table td {
+    padding: 6px 7px;
+    white-space: nowrap;
+  }
 }
 
