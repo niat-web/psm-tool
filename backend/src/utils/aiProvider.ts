@@ -352,11 +352,12 @@ export const aiTranscribeAudio = async (
   form.append("model", runtime.models.transcribe);
   form.append("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "segment");
+  const transcribeApiKey = runtime.transcribeApiKey || runtime.apiKey;
 
   const response = await fetch(runtime.endpoints.transcribe, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${runtime.apiKey}`,
+      Authorization: `Bearer ${transcribeApiKey}`,
     },
     body: form,
   });
@@ -370,7 +371,7 @@ export const aiTranscribeAudio = async (
     const fallbackResponse = await fetch(runtime.endpoints.transcribe, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${runtime.apiKey}`,
+        Authorization: `Bearer ${transcribeApiKey}`,
       },
       body: fallbackForm,
     });

@@ -13,6 +13,10 @@ export type ProviderSettings = {
 
 export type ProviderSettingsEntry = {
   apiKey: string;
+  apiKey2: string;
+  apiKey3: string;
+  apiKey4: string;
+  transcribeApiKey: string;
   chatEndpoint: string;
   ocrEndpoint: string;
   transcribeEndpoint: string;
@@ -24,6 +28,8 @@ export type ProviderSettingsEntry = {
 export type ProviderRuntimeConfig = {
   provider: AiProvider;
   apiKey: string;
+  rotationApiKeys: string[];
+  transcribeApiKey: string;
   endpoints: {
     chat: string;
     ocr: string;
@@ -45,6 +51,10 @@ const nowIso = (): string => new Date().toISOString();
 
 const OPENAI_DEFAULTS: ProviderSettingsEntry = {
   apiKey: process.env.OPENAI_API_KEY?.trim() ?? "",
+  apiKey2: "",
+  apiKey3: "",
+  apiKey4: "",
+  transcribeApiKey: "",
   chatEndpoint:
     process.env.OPENAI_CHAT_ENDPOINT?.trim() ?? "https://api.openai.com/v1/chat/completions",
   ocrEndpoint: process.env.OPENAI_OCR_ENDPOINT?.trim() ?? "https://api.openai.com/v1/chat/completions",
@@ -61,6 +71,10 @@ const MISTRAL_DEFAULTS: ProviderSettingsEntry = {
     getMistralChatKeys()[0]?.trim() ??
     getMistralTranscribeKey()?.trim() ??
     "",
+  apiKey2: process.env.MISTRAL_API_KEY_2?.trim() ?? "",
+  apiKey3: process.env.MISTRAL_API_KEY_3?.trim() ?? "",
+  apiKey4: process.env.MISTRAL_API_KEY_4?.trim() ?? "",
+  transcribeApiKey: process.env.MISTRAL_TRANSCRIBE_API_KEY?.trim() ?? "",
   chatEndpoint: MISTRAL_URLS.chat,
   ocrEndpoint: MISTRAL_URLS.ocr,
   transcribeEndpoint: MISTRAL_URLS.transcribe,
@@ -81,6 +95,10 @@ const normalizeEntry = (value: unknown, fallback: ProviderSettingsEntry): Provid
 
   return {
     apiKey: normalizeString(source.apiKey, fallback.apiKey),
+    apiKey2: normalizeString(source.apiKey2, fallback.apiKey2),
+    apiKey3: normalizeString(source.apiKey3, fallback.apiKey3),
+    apiKey4: normalizeString(source.apiKey4, fallback.apiKey4),
+    transcribeApiKey: normalizeString(source.transcribeApiKey, fallback.transcribeApiKey),
     chatEndpoint: normalizeString(source.chatEndpoint, fallback.chatEndpoint),
     ocrEndpoint: normalizeString(source.ocrEndpoint, fallback.ocrEndpoint),
     transcribeEndpoint: normalizeString(source.transcribeEndpoint, fallback.transcribeEndpoint),
@@ -169,9 +187,18 @@ export const getRuntimeProviderConfig = async (provider: AiProvider): Promise<Pr
     throw new Error(`Missing ${provider.toUpperCase()} API key in settings.`);
   }
 
+  const rotationApiKeys =
+    provider === "mistral"
+      ? [...new Set([selected.apiKey, selected.apiKey2, selected.apiKey3, selected.apiKey4].map((key) => key.trim()).filter((key) => key.length > 0))]
+      : [selected.apiKey.trim()];
+
+  const transcribeApiKey = selected.transcribeApiKey.trim() || selected.apiKey.trim();
+
   return {
     provider,
-    apiKey: selected.apiKey,
+    apiKey: selected.apiKey.trim(),
+    rotationApiKeys,
+    transcribeApiKey,
     endpoints: {
       chat: selected.chatEndpoint,
       ocr: selected.ocrEndpoint,

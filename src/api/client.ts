@@ -122,7 +122,16 @@ export const fetchProviderSettings = async (): Promise<ProviderSettings> => {
 };
 
 export const saveProviderSettings = async (settings: ProviderSettings): Promise<ProviderSettings> => {
-  return postJson<ProviderSettings>("/settings/provider-config", settings, CONFIG_TIMEOUT_MS);
+  const url = toApiUrl("/settings/provider-config");
+  const response = await fetchWithTimeout(url, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(settings),
+  }, CONFIG_TIMEOUT_MS);
+  await assertResponse(response, url);
+  return parseJson<ProviderSettings>(response, url);
 };
 
 export const fetchJobStatus = async (jobId: string): Promise<JobStatusResponse> => {

@@ -111,27 +111,78 @@ type StatusUpdateCallback = (
   payload?: JobUpdatePayload<DrilldownAnalysisResult>,
 ) => void;
 
-const getDrilldownMistralRotationKeys = (): string[] => {
-  const keys = [
-    process.env.MISTRAL_API_KEY_1,
-    process.env.MISTRAL_API_KEY_2,
-    process.env.MISTRAL_API_KEY_3,
-    process.env.MISTRAL_API_KEY_4,
-  ]
-    .map((value) => String(value ?? "").trim())
-    .filter((value) => value.length > 0);
-
-  return [...new Set(keys)];
-};
-
 const nowDate = (): string => new Date().toISOString().slice(0, 10);
 const nowDateTime = (): string => new Date().toISOString().slice(0, 19).replace("T", " ");
+
+const INVALID_ROUND_TEXT_VALUES = new Set([
+  "nan",
+  "no",
+  "yes",
+  "na",
+  "n/a",
+  "#n/a",
+  "none",
+  "null",
+  "nil",
+  "-",
+  "--",
+  "---",
+  "not available",
+  "not applicable",
+]);
+
+const INVALID_ROUND_TEXT_COMPACT = new Set([
+  "nan",
+  "no",
+  "yes",
+  "na",
+  "none",
+  "null",
+  "nil",
+  "notavailable",
+  "notapplicable",
+]);
 
 const isValidRoundText = (value: unknown): boolean => {
   if (value === null || value === undefined) return false;
   const text = String(value).trim();
   if (!text) return false;
-  return !["nan", "no", "yes", "na", "none", "null", ""].includes(text.toLowerCase());
+  const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  const compact = normalized.replace(/[^a-z0-9]/g, "");
+  if (INVALID_ROUND_TEXT_VALUES.has(normalized)) return false;
+  if (INVALID_ROUND_TEXT_COMPACT.has(compact)) return false;
+  return true;
+};
+
+const extractQuestionText = (item: Record<string, unknown>): string => {
+  const directCandidates = [
+    item.question_text,
+    item.questionText,
+    item.question,
+    item.text,
+    item.prompt,
+    item.formatted_question,
+  ];
+
+  for (const candidate of directCandidates) {
+    const text = String(candidate ?? "").trim();
+    if (text) return text;
+  }
+
+  const nestedQuestions = item.questions;
+  if (Array.isArray(nestedQuestions)) {
+    for (const nested of nestedQuestions) {
+      if (typeof nested === "string" && nested.trim()) {
+        return nested.trim();
+      }
+      if (typeof nested === "object" && nested !== null) {
+        const nestedText = extractQuestionText(nested as Record<string, unknown>);
+        if (nestedText) return nestedText;
+      }
+    }
+  }
+
+  return "";
 };
 
 const analyzeRound = async (
@@ -218,13 +269,15 @@ const analyzeCandidateRow = async (args: {
     abortIfCancelled?.();
     let addedForRound = 0;
     for (const item of extractedItems) {
-      const questionText = String(item.question_text ?? "").trim();
+      const questionText = extractQuestionText(item);
       if (!questionText) continue;
 
-      const questionType = forceEnumFormat(item.question_type ?? "GENERAL");
-      const techStacks = forceEnumFormat(item.question_concept ?? "GENERAL");
-      const topic = forceEnumFormat(item.topic ?? "N/A");
-      const subTopic = forceEnumFormat(item.sub_topic ?? "N/A");
+      const questionType = forceEnumFormat(item.question_type ?? item.questionType ?? item.type ?? "GENERAL");
+      const techStacks = forceEnumFormat(
+        item.question_concept ?? item.tech_stacks ?? item.techStacks ?? item.category ?? "GENERAL",
+      );
+      const topic = forceEnumFormat(item.topic ?? item.main_topic ?? "N/A");
+      const subTopic = forceEnumFormat(item.sub_topic ?? item.subTopic ?? "N/A");
       addedForRound += 1;
 
       candidateRows.push({
@@ -239,8 +292,8 @@ const analyzeCandidateRow = async (args: {
         tech_stacks: techStacks,
         topic,
         sub_topic: subTopic,
-        difficulty_level: forceEnumFormat(item.difficulty ?? "MEDIUM"),
-        curriculum_coverage: forceEnumFormat(item.curriculum_coverage ?? "N/A"),
+        difficulty_level: forceEnumFormat(item.difficulty ?? item.difficulty_level ?? "MEDIUM"),
+        curriculum_coverage: forceEnumFormat(item.curriculum_coverage ?? item.coverage ?? "N/A"),
         question_uid: randomUUID().replace(/-/g, ""),
         interview_date: dateVal,
         question_creation_datetime: nowDateTime(),
@@ -293,7 +346,7 @@ export const analyzeDrilldownRows = async (
   const runtimePool =
     baseRuntime.provider === "mistral"
       ? (() => {
-          const keys = getDrilldownMistralRotationKeys();
+          const keys = baseRuntime.rotationApiKeys;
           if (keys.length === 0) {
             return [baseRuntime];
           }
@@ -346,7 +399,7 @@ export const analyzeDrilldownRows = async (
   sendProgress("Starting drilldown analysis with 1 worker...");
 
   let nextRowIndex = 0;
-  let fatalError: Error | null = null;
+  const skippedCandidates: string[] = [];
 
   const takeNextRowIndex = (): number | null => {
     if (nextRowIndex >= totalRows) {
@@ -359,7 +412,6 @@ export const analyzeDrilldownRows = async (
 
   const runWorker = async (workerIndex: number): Promise<void> => {
     for (;;) {
-      if (fatalError) return;
       abortIfCancelled?.();
       const rowIndex = takeNextRowIndex();
       if (rowIndex === null) {
@@ -385,8 +437,11 @@ export const analyzeDrilldownRows = async (
         rowsByCandidateIndex[rowIndex] = candidateRows;
         sendProgress(`Completed candidate ${candidateNumber}/${totalRows}.`);
       } catch (error) {
-        fatalError = new Error(`Candidate ${candidateNumber}/${totalRows} failed: ${String(error)}`);
-        return;
+        const message = `Candidate ${candidateNumber}/${totalRows} skipped: ${String(error)}`;
+        skippedCandidates.push(message);
+        rowsByCandidateIndex[rowIndex] = [];
+        onStatus?.(message);
+        sendProgress(message);
       }
     }
   };
@@ -395,15 +450,16 @@ export const analyzeDrilldownRows = async (
     Array.from({ length: workerCount }, (_unused, workerIndex) => runWorker(workerIndex)),
   );
 
-  if (fatalError) {
-    throw fatalError;
+  if (skippedCandidates.length > 0) {
+    onStatus?.(`Skipped ${skippedCandidates.length}/${totalRows} candidates due to parse issues.`);
   }
 
   const orderedRows = orderRowsByHeaders(flattenCompletedRows());
 
   if (rows.length > 0 && orderedRows.length === 0) {
+    const firstIssue = skippedCandidates[0] ? ` First issue: ${skippedCandidates[0]}` : "";
     throw new Error(
-      "No questions were extracted from drilldown input. Check round note quality and model JSON output.",
+      `No questions were extracted from drilldown input. Check round note quality and model JSON output.${firstIssue}`,
     );
   }
 

@@ -10,6 +10,10 @@ export type AiProvider = "mistral" | "openai";
 
 export type ProviderSettingsEntry = {
   apiKey: string;
+  apiKey2: string;
+  apiKey3: string;
+  apiKey4: string;
+  transcribeApiKey: string;
   chatEndpoint: string;
   ocrEndpoint: string;
   transcribeEndpoint: string;
