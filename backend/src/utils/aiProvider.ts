@@ -29,6 +29,8 @@ export type TranscriptionSegment = {
   text: string;
 };
 
+type TranscriptionResponseFormat = "verbose_json" | "json" | "text";
+
 let lastMistralChatCallTs = 0;
 
 const parseMaybeJson = (input: string): unknown => {
@@ -337,6 +339,45 @@ const parseTranscriptionSegments = (json: any): TranscriptionSegment[] => {
   return [{ start: 0, end: 0, text }];
 };
 
+const parseTranscriptionResponse = async (
+  response: Response,
+  responseFormat: TranscriptionResponseFormat,
+): Promise<TranscriptionSegment[]> => {
+  if (responseFormat === "text") {
+    const text = (await response.text()).trim();
+    return text ? [{ start: 0, end: 0, text }] : [];
+  }
+
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("application/json")) {
+    return parseTranscriptionSegments(await response.json());
+  }
+
+  const raw = await response.text();
+  try {
+    return parseTranscriptionSegments(JSON.parse(raw));
+  } catch {
+    const text = raw.trim();
+    return text ? [{ start: 0, end: 0, text }] : [];
+  }
+};
+
+const buildTranscriptionForm = (args: {
+  fileName: string;
+  audioBlob: Blob;
+  model: string;
+  responseFormat: TranscriptionResponseFormat;
+}): FormData => {
+  const form = new FormData();
+  form.append("file", args.audioBlob, args.fileName);
+  form.append("model", args.model);
+  form.append("response_format", args.responseFormat);
+  if (args.responseFormat === "verbose_json") {
+    form.append("timestamp_granularities[]", "segment");
+  }
+  return form;
+};
+
 export const aiTranscribeAudio = async (
   runtime: ProviderRuntimeConfig,
   audioPath: string,
@@ -347,11 +388,17 @@ export const aiTranscribeAudio = async (
 
   const audioBuffer = fs.readFileSync(audioPath);
   const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" });
-  const form = new FormData();
-  form.append("file", audioBlob, path.basename(audioPath));
-  form.append("model", runtime.models.transcribe);
-  form.append("response_format", "verbose_json");
-  form.append("timestamp_granularities[]", "segment");
+  const fileName = path.basename(audioPath);
+  const primaryFormat: TranscriptionResponseFormat =
+    runtime.provider === "openai" ? "json" : "verbose_json";
+  const fallbackFormat: TranscriptionResponseFormat =
+    runtime.provider === "openai" ? "text" : "json";
+  const form = buildTranscriptionForm({
+    fileName,
+    audioBlob,
+    model: runtime.models.transcribe,
+    responseFormat: primaryFormat,
+  });
   const transcribeApiKey = runtime.transcribeApiKey || runtime.apiKey;
 
   const response = await fetch(runtime.endpoints.transcribe, {
@@ -363,10 +410,12 @@ export const aiTranscribeAudio = async (
   });
 
   if (!response.ok) {
-    const fallbackForm = new FormData();
-    fallbackForm.append("file", audioBlob, path.basename(audioPath));
-    fallbackForm.append("model", runtime.models.transcribe);
-    fallbackForm.append("response_format", "verbose_json");
+    const fallbackForm = buildTranscriptionForm({
+      fileName,
+      audioBlob,
+      model: runtime.models.transcribe,
+      responseFormat: fallbackFormat,
+    });
 
     const fallbackResponse = await fetch(runtime.endpoints.transcribe, {
       method: "POST",
@@ -381,8 +430,8 @@ export const aiTranscribeAudio = async (
       throw new Error(`Transcription failed: ${fallbackResponse.status} ${text}`);
     }
 
-    return parseTranscriptionSegments(await fallbackResponse.json());
+    return parseTranscriptionResponse(fallbackResponse, fallbackFormat);
   }
 
-  return parseTranscriptionSegments(await response.json());
+  return parseTranscriptionResponse(response, primaryFormat);
 };
