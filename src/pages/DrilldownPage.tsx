@@ -13,14 +13,23 @@ import {
   waitForJobCompletion,
 } from "../utils/jobPolling";
 import { parseCsvRows } from "../utils/parsers";
-import type { ApiResult } from "../types";
+import type { AiProvider, ApiResult, JobProgress } from "../types";
 
-export function DrilldownPage({ product }: { product: string }) {
+export function DrilldownPage({
+  product,
+  provider,
+  onProviderChange,
+}: {
+  product: string;
+  provider: AiProvider;
+  onProviderChange: (provider: AiProvider) => void;
+}) {
   const [rows, setRows] = useState<Array<Record<string, string>>>([]);
   const [result, setResult] = useState<ApiResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveStatus, setLiveStatus] = useState("");
+  const [progress, setProgress] = useState<JobProgress | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const pollAbortRef = useRef<AbortController | null>(null);
 
@@ -42,18 +51,24 @@ export function DrilldownPage({ product }: { product: string }) {
       setError(null);
       setResult(null);
       setLiveStatus("Submitting drilldown job...");
-      const started = await startDrilldownJob(rows, product);
+      setProgress(null);
+      const started = await startDrilldownJob(rows, product, provider);
       setActiveJobId(started.jobId);
       const response = await waitForJobCompletion(
         started.jobId,
         (status) => {
           setLiveStatus(status.message);
+          setProgress(status.progress ?? null);
+          if (status.partialResult) {
+            setResult(status.partialResult);
+          }
         },
         1200,
         { signal: pollController.signal },
       );
       setResult(response);
       setLiveStatus("Completed.");
+      setProgress(null);
       void notifyJobCompleted({
         jobName: "Drilldown Analysis",
         rowsCount: response.rows.length,
@@ -65,14 +80,17 @@ export function DrilldownPage({ product }: { product: string }) {
       }
       if (isJobCancelledByUserError(err)) {
         setLiveStatus("Stopped by user.");
+        setProgress(null);
         return;
       }
       void notifyJobFailed({ jobName: "Drilldown Analysis", errorMessage: String(err) });
       setError(String(err));
+      setProgress(null);
     } finally {
       setLoading(false);
       setActiveJobId(null);
       pollAbortRef.current = null;
+      setProgress(null);
     }
   };
 
@@ -89,15 +107,30 @@ export function DrilldownPage({ product }: { product: string }) {
       setActiveJobId(null);
       setLoading(false);
       setLiveStatus("Stopped by user.");
+      setProgress(null);
     } catch (err) {
       setError(String(err));
     }
   };
 
+  const progressPercent =
+    progress === null ? null : Math.min(100, Math.max(0, Math.round(progress.percent)));
+
   return (
     <div className="page-section">
       <section className="panel">
         <h3>Drilldown</h3>
+        <div className="field-row">
+          <label htmlFor="drilldown-provider">API</label>
+          <select
+            id="drilldown-provider"
+            value={provider}
+            onChange={(event) => onProviderChange(event.target.value as AiProvider)}
+          >
+            <option value="mistral">Mistral API</option>
+            <option value="openai">OpenAI API</option>
+          </select>
+        </div>
         <a className="link-button" href={getDrilldownSampleTemplateUrl()} target="_blank" rel="noreferrer">
           Download Sample Template
         </a>
@@ -129,7 +162,19 @@ export function DrilldownPage({ product }: { product: string }) {
             </button>
           )}
         </div>
-        {(loading || liveStatus) && <div className="live-status-line">{liveStatus || "Starting..."}</div>}
+        {(loading || liveStatus) && (
+          <div className={`live-status-line ${progressPercent !== null ? "with-progress" : ""}`}>
+            <span className="live-status-text">{liveStatus || "Starting..."}</span>
+            {progressPercent !== null && (
+              <div className="live-status-progress-inline">
+                <div className="live-progress-track">
+                  <div className="live-progress-fill" style={{ width: `${progressPercent}%` }} />
+                </div>
+                <span className="live-progress-percent">{progressPercent}%</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {error && <div className="error-box">{error}</div>}
 

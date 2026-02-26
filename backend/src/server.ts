@@ -7,6 +7,7 @@ import assignmentsRoutes from "./routes/assignments";
 import assessmentsRoutes from "./routes/assessments";
 import interviewRoutes from "./routes/interview";
 import jobsRoutes from "./routes/jobs";
+import settingsRoutes from "./routes/settings";
 
 const app = express();
 const apiBodyLimit = process.env.API_BODY_LIMIT ?? "200mb";
@@ -20,6 +21,7 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", metaRoutes);
+app.use("/api/settings", settingsRoutes);
 app.use("/api/drilldown", drilldownRoutes);
 app.use("/api/assignments", assignmentsRoutes);
 app.use("/api/assessments", assessmentsRoutes);

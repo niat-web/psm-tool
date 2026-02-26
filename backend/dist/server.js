@@ -13,9 +13,10 @@ const assessments_1 = __importDefault(require("./routes/assessments"));
 const interview_1 = __importDefault(require("./routes/interview"));
 const jobs_1 = __importDefault(require("./routes/jobs"));
 const app = (0, express_1.default)();
+const apiBodyLimit = process.env.API_BODY_LIMIT ?? "200mb";
 app.use((0, cors_1.default)());
-app.use(express_1.default.json({ limit: "25mb" }));
-app.use(express_1.default.urlencoded({ extended: true, limit: "25mb" }));
+app.use(express_1.default.json({ limit: apiBodyLimit }));
+app.use(express_1.default.urlencoded({ extended: true, limit: apiBodyLimit }));
 app.get("/api/health", (_req, res) => {
     res.json({ ok: true, timestamp: new Date().toISOString() });
 });
@@ -25,6 +26,15 @@ app.use("/api/assignments", assignments_1.default);
 app.use("/api/assessments", assessments_1.default);
 app.use("/api/interview", interview_1.default);
 app.use("/api/jobs", jobs_1.default);
+app.use((error, _req, res, next) => {
+    if (error?.status === 413 || error?.type === "entity.too.large") {
+        res.status(413).json({
+            error: `Request payload too large. Current API_BODY_LIMIT=${apiBodyLimit}.`,
+        });
+        return;
+    }
+    next(error);
+});
 const port = Number(process.env.BACKEND_PORT ?? process.env.PORT ?? 4000);
 app.listen(port, () => {
     // eslint-disable-next-line no-console

@@ -25,16 +25,20 @@ import {
   validateVideoUploaderMetadata,
   type ValidationReport,
 } from "../utils/validators";
-import type { ApiResult, InterviewInputRow, JobProgress, VideoUploaderMetadata } from "../types";
+import type { AiProvider, ApiResult, InterviewInputRow, JobProgress, VideoUploaderMetadata } from "../types";
 
 type InterviewPageProps = {
   product: string;
   modules: string[];
+  selectedModule: string;
+  onModuleChange: (module: string) => void;
+  provider: AiProvider;
+  onProviderChange: (provider: AiProvider) => void;
 };
 
 const defaultModules = ["Interview_analyser", "Video_uploader"];
 
-function InterviewAnalyzerModule({ product }: { product: string }) {
+function InterviewAnalyzerModule({ product, provider }: { product: string; provider: AiProvider }) {
   const [inputMethod, setInputMethod] = useState<"Paste Text" | "Upload CSV">("Paste Text");
   const [pasteText, setPasteText] = useState("");
   const [rows, setRows] = useState<InterviewInputRow[]>([]);
@@ -111,7 +115,7 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
       const submittingMessage = "Submitting interview analyzer job...";
       setLiveStatus(submittingMessage);
       setDownloadProgress(null);
-      const started = await startInterviewAnalyzerJob(rows, product);
+      const started = await startInterviewAnalyzerJob(rows, product, provider);
       setActiveJobId(started.jobId);
       const response = await waitForJobCompletion(
         started.jobId,
@@ -278,7 +282,7 @@ function InterviewAnalyzerModule({ product }: { product: string }) {
   );
 }
 
-function VideoUploaderModule({ product }: { product: string }) {
+function VideoUploaderModule({ product, provider }: { product: string; provider: AiProvider }) {
   const [metadataInputMethod, setMetadataInputMethod] = useState<"Paste Text" | "Upload CSV">("Paste Text");
   const [metadataPaste, setMetadataPaste] = useState("");
   const [metadata, setMetadata] = useState<VideoUploaderMetadata | null>(null);
@@ -352,7 +356,7 @@ function VideoUploaderModule({ product }: { product: string }) {
       setError(null);
       setResult(null);
       setLiveStatus("Submitting local video job...");
-      const started = await startVideoUploaderJob({ metadata, file, product });
+      const started = await startVideoUploaderJob({ metadata, file, product, provider });
       setActiveJobId(started.jobId);
       const response = await waitForJobCompletion(
         started.jobId,
@@ -504,31 +508,53 @@ function VideoUploaderModule({ product }: { product: string }) {
   );
 }
 
-export function InterviewPage({ product, modules }: InterviewPageProps) {
+export function InterviewPage({
+  product,
+  modules,
+  selectedModule,
+  onModuleChange,
+  provider,
+  onProviderChange,
+}: InterviewPageProps) {
   const moduleOptions = modules.length > 0 ? modules : defaultModules;
-  const [selectedModule, setSelectedModule] = useState<string>(moduleOptions[0]);
+  const resolvedSelectedModule = moduleOptions.includes(selectedModule)
+    ? selectedModule
+    : moduleOptions[0];
 
   return (
     <div className="page-section">
-      <div className="field-row">
-        <label htmlFor="interview-module">Select</label>
-        <select
-          id="interview-module"
-          value={selectedModule}
-          onChange={(event) => setSelectedModule(event.target.value)}
-        >
-          {moduleOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
+      <div className="field-two-col-row">
+        <label className="field-row-stacked" htmlFor="interview-module">
+          Select
+          <select
+            id="interview-module"
+            value={resolvedSelectedModule}
+            onChange={(event) => onModuleChange(event.target.value)}
+          >
+            {moduleOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field-row-stacked" htmlFor="interview-provider">
+          API
+          <select
+            id="interview-provider"
+            value={provider}
+            onChange={(event) => onProviderChange(event.target.value as AiProvider)}
+          >
+            <option value="mistral">Mistral API</option>
+            <option value="openai">OpenAI API</option>
+          </select>
+        </label>
       </div>
 
-      {selectedModule === "Video_uploader" ? (
-        <VideoUploaderModule product={product} />
+      {resolvedSelectedModule === "Video_uploader" ? (
+        <VideoUploaderModule product={product} provider={provider} />
       ) : (
-        <InterviewAnalyzerModule product={product} />
+        <InterviewAnalyzerModule product={product} provider={provider} />
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import { analyzeAssessmentIndividual, analyzeAssessmentZip } from "../services/assessmentsService";
 import { createJob } from "../utils/jobManager";
+import { normalizeAiProvider } from "../utils/provider";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -19,12 +20,14 @@ router.post("/individual", upload.any(), async (req, res) => {
     const rowsRaw = typeof req.body?.rows === "string" ? req.body.rows : "[]";
     const rows = JSON.parse(rowsRaw);
     const product = String(req.body?.product ?? "N/A");
+    const provider = normalizeAiProvider(req.body?.provider);
 
     const fileMap = toFileMap(req.files as Express.Multer.File[]);
     const result = await analyzeAssessmentIndividual({
       rows,
       files: fileMap,
       product,
+      provider,
     });
 
     res.json(result);
@@ -38,6 +41,7 @@ router.post("/individual/start", upload.any(), async (req, res) => {
     const rowsRaw = typeof req.body?.rows === "string" ? req.body.rows : "[]";
     const rows = JSON.parse(rowsRaw);
     const product = String(req.body?.product ?? "N/A");
+    const provider = normalizeAiProvider(req.body?.provider);
 
     const fileMap = toFileMap(req.files as Express.Multer.File[]);
     const job = createJob(async (update, control) =>
@@ -45,6 +49,7 @@ router.post("/individual/start", upload.any(), async (req, res) => {
         rows,
         files: fileMap,
         product,
+        provider,
         onStatus: update,
         abortIfCancelled: control.throwIfCancelled,
       }),
@@ -61,12 +66,14 @@ router.post("/zip", upload.any(), async (req, res) => {
     const rowsRaw = typeof req.body?.rows === "string" ? req.body.rows : "[]";
     const rows = JSON.parse(rowsRaw);
     const product = String(req.body?.product ?? "N/A");
+    const provider = normalizeAiProvider(req.body?.provider);
 
     const fileMap = toFileMap(req.files as Express.Multer.File[]);
     const result = await analyzeAssessmentZip({
       rows,
       files: fileMap,
       product,
+      provider,
     });
 
     res.json(result);
@@ -80,6 +87,7 @@ router.post("/zip/start", upload.any(), async (req, res) => {
     const rowsRaw = typeof req.body?.rows === "string" ? req.body.rows : "[]";
     const rows = JSON.parse(rowsRaw);
     const product = String(req.body?.product ?? "N/A");
+    const provider = normalizeAiProvider(req.body?.provider);
 
     const fileMap = toFileMap(req.files as Express.Multer.File[]);
     const job = createJob(async (update, control) =>
@@ -87,6 +95,7 @@ router.post("/zip/start", upload.any(), async (req, res) => {
         rows,
         files: fileMap,
         product,
+        provider,
         onStatus: update,
         abortIfCancelled: control.throwIfCancelled,
       }),

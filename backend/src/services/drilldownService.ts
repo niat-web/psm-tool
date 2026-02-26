@@ -2,69 +2,72 @@ import { randomUUID } from "node:crypto";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
 import { appendRowsWithHeaders } from "../utils/google";
-import { mistralJsonAsArray } from "../utils/mistral";
+import { aiJsonAsArray } from "../utils/aiProvider";
+import type { JobUpdatePayload } from "../utils/jobManager";
 import { SHEET_NAMES } from "../config";
+import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
+import type { AiProvider } from "../types";
 
 const DRILLDOWN_PROMPT_TEMPLATE = `
 ### SYSTEM ROLE
-You are a Senior Technical Curriculum Architect and Data Standardizer.
-You will receive a JSON array of Q&A pairs. Your task is to classify, tag, and enrich each pair with standardized metadata.
+You are a technical interview question formatter and classifier.
+You will receive raw interview notes for one interview round.
+Your task is to convert unformatted notes into well-formed interview questions, classify each question, and mark curriculum coverage.
 
 ### INPUT DATA
-A list of objects containing \`question_text\` and \`answer_text\`.
+You will receive one JSON object:
+- \`interview_round\` (round name)
+- \`round_text\` (raw notes for that round, may be shorthand)
 
 ### CURRICULUM CONTEXT
-Use the following curriculum text to determine if a topic is covered in the syllabus:
+Use this curriculum text to determine coverage:
 {{CURRICULUM_CONTEXT}}
 
-### CLASSIFICATION RULES
+### OUTPUT STRUCTURE
+Return a JSON array.
+Each item must include:
+- \`question_text\`
+- \`question_type\`
+- \`question_concept\`
+- \`difficulty\`
+- \`topic\`
+- \`sub_topic\`
+- \`curriculum_coverage\` (COVERED | NOT_COVERED | N/A)
 
-**1. OUTPUT STRUCTURE**
-Return a JSON array where EACH item includes the original data plus new fields.
-Required fields: \`question_text\`, \`answer_text\`, \`question_type\`, \`question_concept\`, \`difficulty\`, \`topic\`, \`sub_topic\`, \`relevancy_score\`, \`curriculum_coverage\`.
+### ENUM RULES (UPPERCASE_SNAKE_CASE)
+* **question_type:**
+  * \`CODING\`
+  * \`THEORY\`
+  * \`BEHAVIORAL\`
+  * \`SELF_INTRODUCTION\`
+  * \`PROJECT\`
+  * \`GENERAL\`
 
-**2. ENUMERATION RULES (Use UPPERCASE_SNAKE_CASE)**
+* **difficulty:**
+  * \`EASY\`
+  * \`MEDIUM\`
+  * \`HARD\`
 
-*   **question_type:**
-    *   \`CODING\` (Writing code, algorithms, syntax)
-    *   \`THEORY\` (Conceptual understanding, definitions)
-    *   \`BEHAVIORAL\` (Soft skills, past experiences, situational)
-    *   \`SELF_INTRODUCTION\` (Intro, resume walkthrough)
-    *   \`PROJECT\` (Discussing specific past projects)
-    *   \`GENERAL\` (Any other type)
+* **question_concept:**
+  * Use one best-fit value from this list:
+    * JAVA, PYTHON, JAVASCRIPT, C++, C_SHARP, RUST, TYPESCRIPT, HTML, CSS, SQL
+    * REACT_JS, NODE_JS, EXPRESS_JS, NEXT_JS, ANGULAR_JS, SPRING_BOOT, BOOTSTRAP, DJANGO, FLASK
+    * DSA, OOP, SYSTEM_DESIGN, DBMS, OS, CN
+    * AI_ML, DATA_SCIENCE, WEB_DEVELOPMENT, CLOUD_COMPUTING, DEVOPS, CYBERSECURITY, BLOCKCHAIN, MOBILE_DEV
+    * GIT, DOCKER, KUBERNETES, AWS, AZURE, SDLC, AGILE, TESTING
+    * APTITUDE, LOGICAL_REASONING, ENGLISH, COMMUNICATION, BEHAVIORAL
+    * ANY_LANGUAGE (technical but generic), GENERAL (non-technical)
 
-*   **difficulty:**
-    *   \`EASY\` (Basic definitions, recall, standard behavioral questions)
-    *   \`MEDIUM\` (Implementation details, comparisons, explaining 'how' or 'why')
-    *   \`HARD\` (System design, optimization, edge cases, complex scenarios)
+* **curriculum_coverage:**
+  * \`COVERED\`: concept/topic appears in curriculum context
+  * \`NOT_COVERED\`: technical but not present in curriculum context
+  * \`N/A\`: non-technical or insufficient curriculum context
 
-*   **curriculum_coverage:**
-    *   \`COVERED\` (The specific concept appears in the provided Curriculum Context)
-    *   \`NOT_COVERED\` (The concept is technical but NOT found in the context)
-    *   \`N/A\` (For General/Behavioral questions or if context is missing)
-
-*   **relevancy_score:**
-    *   A string number from "0" to "10".
-    *   \`0-3\`: Irrelevant / Chit-chat.
-    *   \`4-7\`: Standard/Generic questions.
-    *   \`8-10\`: Deeply technical or highly specific to the job role.
-
-**3. TECH STACK STANDARDIZATION (\`question_concept\`)**
-Map the question to the *single best fit* from this list. If it fits multiple, pick the most specific one.
-*   **Languages:** JAVA, PYTHON, JAVASCRIPT, C++, C_SHARP, RUST, TYPESCRIPT, HTML, CSS, SQL.
-*   **Frameworks/Libs:** REACT_JS, NODE_JS, EXPRESS_JS, NEXT_JS, ANGULAR_JS, SPRING_BOOT, BOOTSTRAP, DJANGO, FLASK.
-*   **Core Concepts:** DSA (Data Structures & Algos), OOP (Object Oriented Programming), SYSTEM_DESIGN, DBMS (Databases), OS (Operating Systems), CN (Networks).
-*   **Domains:** AI_ML, DATA_SCIENCE, WEB_DEVELOPMENT, CLOUD_COMPUTING, DEVOPS, CYBERSECURITY, BLOCKCHAIN, MOBILE_DEV.
-*   **Tools/Process:** GIT, DOCKER, KUBERNETES, AWS, AZURE, SDLC, AGILE, TESTING.
-*   **Non-Technical:** APTITUDE, LOGICAL_REASONING, ENGLISH, COMMUNICATION, BEHAVIORAL.
-*   *Fallback:* Use \`ANY_LANGUAGE\` if technical but generic; use \`GENERAL\` if non-technical.
-
-**4. TOPIC & SUB_TOPIC**
-*   **topic:** High-level category (e.g., "Java", "Behavioral", "Project").
-*   **sub_topic:** Specific concept (e.g., "Collections", "Team Conflict", "Architecture").
-
-### OUTPUT FORMAT
-Provide ONLY the raw JSON array. No markdown.
+### EXTRACTION RULES
+* Always convert shorthand/keywords into complete interview questions.
+* Keep \`question_text\` clear and grammatically correct.
+* If round_text contains multiple prompts, return one item per question.
+* Return only raw JSON. No markdown.
 `;
 
 const ROUND_COLUMN_MAP: Record<string, string> = {
@@ -98,6 +101,29 @@ const SHEET_HEADERS = [
   "product",
 ];
 
+type DrilldownAnalysisResult = {
+  rows: Array<Record<string, string>>;
+  savedToSheet: boolean;
+};
+
+type StatusUpdateCallback = (
+  message: string,
+  payload?: JobUpdatePayload<DrilldownAnalysisResult>,
+) => void;
+
+const getDrilldownMistralRotationKeys = (): string[] => {
+  const keys = [
+    process.env.MISTRAL_API_KEY_1,
+    process.env.MISTRAL_API_KEY_2,
+    process.env.MISTRAL_API_KEY_3,
+    process.env.MISTRAL_API_KEY_4,
+  ]
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value.length > 0);
+
+  return [...new Set(keys)];
+};
+
 const nowDate = (): string => new Date().toISOString().slice(0, 10);
 const nowDateTime = (): string => new Date().toISOString().slice(0, 19).replace("T", " ");
 
@@ -108,93 +134,300 @@ const isValidRoundText = (value: unknown): boolean => {
   return !["nan", "no", "yes", "na", "none", "null", ""].includes(text.toLowerCase());
 };
 
-const analyzeRound = async (systemPrompt: string, roundName: string, roundText: string) => {
-  const userContent = `RAW INTERVIEW NOTES for ${roundName}:\n\n${roundText}`;
+const analyzeRound = async (
+  runtime: ProviderRuntimeConfig,
+  systemPrompt: string,
+  roundName: string,
+  roundText: string,
+) => {
+  const userContent = [
+    "ROUND INPUT (JSON):",
+    JSON.stringify({
+      interview_round: roundName,
+      round_text: roundText,
+    }),
+    "",
+    "Convert raw notes into formatted interview questions and classify each question.",
+  ].join("\n");
 
-  const extracted = await mistralJsonAsArray(
+  const extracted = await aiJsonAsArray(
+    runtime,
     [
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ],
-    { responseAsJsonObject: true, temperature: 0.1 },
+    {
+      responseAsJsonObject: true,
+      temperature: 0.1,
+    },
   );
 
   return extracted;
 };
 
-export const analyzeDrilldownRows = async (
-  rows: Array<Record<string, string>>,
-  product: string,
-  onStatus?: (message: string) => void,
-  abortIfCancelled?: () => void,
-): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean }> => {
-  abortIfCancelled?.();
-  onStatus?.("Loading curriculum context...");
-  const curriculum = await getCurriculumSnippet(15000);
-  abortIfCancelled?.();
-  const systemPrompt = DRILLDOWN_PROMPT_TEMPLATE.replace("{{CURRICULUM_CONTEXT}}", curriculum);
+const analyzeCandidateRow = async (args: {
+  row: Record<string, string>;
+  rowIndex: number;
+  totalRows: number;
+  product: string;
+  systemPrompt: string;
+  takeRoundRuntime: () => ProviderRuntimeConfig;
+  onStatus?: StatusUpdateCallback;
+  abortIfCancelled?: () => void;
+}): Promise<Array<Record<string, string>>> => {
+  const { row, rowIndex, totalRows, product, systemPrompt, takeRoundRuntime, onStatus, abortIfCancelled } = args;
+  const candidateNumber = rowIndex + 1;
+  onStatus?.(`Analyzing candidate ${candidateNumber}/${totalRows}...`);
 
-  const finalRows: Array<Record<string, string>> = [];
-  const totalRows = rows.length;
-  let currentRow = 0;
+  const dateVal = (row["Interview Date"] || row.interview_date || nowDate()).trim();
+  const userId = (row["User ID"] || row.user_id || "N/A").trim();
+  const userName = (row["User Name"] || row.user_name || "N/A").trim();
+  const mobile = (row["Mobile Number"] || row.mobile_number || "N/A").trim();
+  const jobId = (row["Job ID"] || row.job_id || "N/A").trim();
+  const company = (row["Company Name"] || row.company_name || "N/A").trim();
 
-  for (const row of rows) {
+  const candidateRows: Array<Record<string, string>> = [];
+  const roundIssues: string[] = [];
+  let analyzedRoundCount = 0;
+
+  for (const [columnName, roundName] of Object.entries(ROUND_COLUMN_MAP)) {
     abortIfCancelled?.();
-    currentRow += 1;
-    onStatus?.(`Analyzing candidate ${currentRow}/${totalRows}...`);
-    const dateVal = (row["Interview Date"] || row.interview_date || nowDate()).trim();
-    const userId = (row["User ID"] || row.user_id || "N/A").trim();
-    const userName = (row["User Name"] || row.user_name || "N/A").trim();
-    const mobile = (row["Mobile Number"] || row.mobile_number || "N/A").trim();
-    const jobId = (row["Job ID"] || row.job_id || "N/A").trim();
-    const company = (row["Company Name"] || row.company_name || "N/A").trim();
+    const rawRound = row[columnName];
+    if (!isValidRoundText(rawRound)) continue;
 
-    for (const [columnName, roundName] of Object.entries(ROUND_COLUMN_MAP)) {
-      abortIfCancelled?.();
-      const rawRound = row[columnName];
-      if (!isValidRoundText(rawRound)) continue;
-      onStatus?.(`Classifying ${roundName} for candidate ${currentRow}/${totalRows}...`);
+    analyzedRoundCount += 1;
+    onStatus?.(`Classifying ${roundName} for candidate ${candidateNumber}/${totalRows}...`);
 
-      const extractedItems = await analyzeRound(systemPrompt, roundName, String(rawRound));
-      abortIfCancelled?.();
-      for (const item of extractedItems) {
-        finalRows.push({
-          job_id: jobId,
-          company_name: company,
-          user_id: userId,
-          full_name: userName,
-          mobile_number: mobile,
-          interview_round: forceEnumFormat(roundName),
-          questions: String(item.question_text ?? ""),
-          question_type: forceEnumFormat(item.question_type ?? "GENERAL"),
-          tech_stacks: forceEnumFormat(item.question_concept ?? "GENERAL"),
-          topic: forceEnumFormat(item.topic ?? "N/A"),
-          sub_topic: forceEnumFormat(item.sub_topic ?? "N/A"),
-          difficulty_level: forceEnumFormat(item.difficulty ?? "MEDIUM"),
-          curriculum_coverage: forceEnumFormat(item.curriculum_coverage ?? "N/A"),
-          question_uid: randomUUID().replace(/-/g, ""),
-          interview_date: dateVal,
-          question_creation_datetime: nowDateTime(),
-          product,
-        });
-      }
+    let extractedItems: Array<Record<string, unknown>> = [];
+    try {
+      const runtime = takeRoundRuntime();
+      extractedItems = await analyzeRound(runtime, systemPrompt, roundName, String(rawRound));
+    } catch (error) {
+      roundIssues.push(`${roundName}: ${String(error)}`);
+      onStatus?.(
+        `Skipping ${roundName} for candidate ${candidateNumber}/${totalRows}: ${String(error)}`,
+      );
+      continue;
+    }
+
+    if (extractedItems.length === 0) {
+      roundIssues.push(`${roundName}: model returned no parseable questions`);
+      continue;
+    }
+
+    abortIfCancelled?.();
+    let addedForRound = 0;
+    for (const item of extractedItems) {
+      const questionText = String(item.question_text ?? "").trim();
+      if (!questionText) continue;
+
+      const questionType = forceEnumFormat(item.question_type ?? "GENERAL");
+      const techStacks = forceEnumFormat(item.question_concept ?? "GENERAL");
+      const topic = forceEnumFormat(item.topic ?? "N/A");
+      const subTopic = forceEnumFormat(item.sub_topic ?? "N/A");
+      addedForRound += 1;
+
+      candidateRows.push({
+        job_id: jobId,
+        company_name: company,
+        user_id: userId,
+        full_name: userName,
+        mobile_number: mobile,
+        interview_round: forceEnumFormat(roundName),
+        questions: questionText,
+        question_type: questionType,
+        tech_stacks: techStacks,
+        topic,
+        sub_topic: subTopic,
+        difficulty_level: forceEnumFormat(item.difficulty ?? "MEDIUM"),
+        curriculum_coverage: forceEnumFormat(item.curriculum_coverage ?? "N/A"),
+        question_uid: randomUUID().replace(/-/g, ""),
+        interview_date: dateVal,
+        question_creation_datetime: nowDateTime(),
+        product,
+      });
+    }
+
+    if (addedForRound === 0) {
+      roundIssues.push(`${roundName}: model output missing question_text`);
     }
   }
 
-  const orderedRows = finalRows.map((row) => {
-    const normalized: Record<string, string> = {};
-    for (const header of SHEET_HEADERS) {
-      normalized[header] = row[header] ?? "N/A";
-    }
-    return normalized;
-  });
+  if (analyzedRoundCount > 0 && candidateRows.length === 0) {
+    const reason =
+      roundIssues.length > 0
+        ? roundIssues.slice(0, 4).join(" | ")
+        : "Model returned empty output for all rounds";
+    throw new Error(`No questions extracted for candidate ${candidateNumber}/${totalRows}. ${reason}`);
+  }
+
+  return candidateRows;
+};
+
+export const analyzeDrilldownRows = async (
+  rows: Array<Record<string, string>>,
+  product: string,
+  provider: AiProvider,
+  onStatus?: StatusUpdateCallback,
+  abortIfCancelled?: () => void,
+): Promise<DrilldownAnalysisResult> => {
+  const orderRowsByHeaders = (rawRows: Array<Record<string, string>>): Array<Record<string, string>> => {
+    return rawRows.map((row) => {
+      const normalized: Record<string, string> = {};
+      for (const header of SHEET_HEADERS) {
+        normalized[header] = row[header] ?? "N/A";
+      }
+      return normalized;
+    });
+  };
 
   abortIfCancelled?.();
-  onStatus?.("Saving drilldown results to sheet...");
+  onStatus?.("Loading curriculum context for drilldown...");
+  const curriculumContext = await getCurriculumSnippet(15000);
+  abortIfCancelled?.();
+  const systemPrompt = DRILLDOWN_PROMPT_TEMPLATE.replace(
+    "{{CURRICULUM_CONTEXT}}",
+    curriculumContext.trim() || "N/A",
+  );
+  const baseRuntime = await getRuntimeProviderConfig(provider);
+  const runtimePool =
+    baseRuntime.provider === "mistral"
+      ? (() => {
+          const keys = getDrilldownMistralRotationKeys();
+          if (keys.length === 0) {
+            return [baseRuntime];
+          }
+
+          return keys.map((apiKey) => ({
+            ...baseRuntime,
+            apiKey,
+          }));
+        })()
+      : [baseRuntime];
+  let runtimeIndex = 0;
+  const takeRoundRuntime = (): ProviderRuntimeConfig => {
+    const runtime = runtimePool[runtimeIndex % runtimePool.length];
+    runtimeIndex += 1;
+    return runtime;
+  };
+
+  const totalRows = rows.length;
+  const rowsByCandidateIndex: Array<Array<Record<string, string>> | null> = Array.from(
+    { length: totalRows },
+    () => null,
+  );
+  const workerCount = 1;
+
+  const flattenCompletedRows = (): Array<Record<string, string>> => {
+    const flattened: Array<Record<string, string>> = [];
+    for (const candidateRows of rowsByCandidateIndex) {
+      if (!candidateRows) continue;
+      flattened.push(...candidateRows);
+    }
+    return flattened;
+  };
+
+  const sendProgress = (message: string): void => {
+    if (!onStatus) return;
+    const completedCandidates = rowsByCandidateIndex.reduce(
+      (count, candidateRows) => (candidateRows ? count + 1 : count),
+      0,
+    );
+    const percent = totalRows === 0 ? 100 : Math.round((completedCandidates / totalRows) * 100);
+    onStatus(message, {
+      progress: { percent },
+      partialResult: {
+        rows: orderRowsByHeaders(flattenCompletedRows()),
+        savedToSheet: false,
+      },
+    });
+  };
+
+  sendProgress("Starting drilldown analysis with 1 worker...");
+
+  let nextRowIndex = 0;
+  let fatalError: Error | null = null;
+
+  const takeNextRowIndex = (): number | null => {
+    if (nextRowIndex >= totalRows) {
+      return null;
+    }
+    const current = nextRowIndex;
+    nextRowIndex += 1;
+    return current;
+  };
+
+  const runWorker = async (workerIndex: number): Promise<void> => {
+    for (;;) {
+      if (fatalError) return;
+      abortIfCancelled?.();
+      const rowIndex = takeNextRowIndex();
+      if (rowIndex === null) {
+        return;
+      }
+
+      const candidateNumber = rowIndex + 1;
+      onStatus?.(
+        `Worker ${workerIndex + 1}/${workerCount}: analyzing candidate ${candidateNumber}/${totalRows}...`,
+      );
+
+      try {
+        const candidateRows = await analyzeCandidateRow({
+          row: rows[rowIndex],
+          rowIndex,
+          totalRows,
+          product,
+          systemPrompt,
+          takeRoundRuntime,
+          onStatus,
+          abortIfCancelled,
+        });
+        rowsByCandidateIndex[rowIndex] = candidateRows;
+        sendProgress(`Completed candidate ${candidateNumber}/${totalRows}.`);
+      } catch (error) {
+        fatalError = new Error(`Candidate ${candidateNumber}/${totalRows} failed: ${String(error)}`);
+        return;
+      }
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: workerCount }, (_unused, workerIndex) => runWorker(workerIndex)),
+  );
+
+  if (fatalError) {
+    throw fatalError;
+  }
+
+  const orderedRows = orderRowsByHeaders(flattenCompletedRows());
+
+  if (rows.length > 0 && orderedRows.length === 0) {
+    throw new Error(
+      "No questions were extracted from drilldown input. Check round note quality and model JSON output.",
+    );
+  }
+
+  abortIfCancelled?.();
+  onStatus?.("Saving drilldown results to sheet...", {
+    progress: { percent: 100 },
+    partialResult: {
+      rows: orderedRows,
+      savedToSheet: false,
+    },
+  });
+
   const savedToSheet = await appendRowsWithHeaders({
     sheetName: SHEET_NAMES.drilldown,
     headers: SHEET_HEADERS,
     rows: orderedRows,
+  });
+
+  onStatus?.(savedToSheet ? "Drilldown analysis completed." : "Drilldown completed, but sheet save failed.", {
+    progress: { percent: 100 },
+    partialResult: {
+      rows: orderedRows,
+      savedToSheet,
+    },
   });
 
   return { rows: orderedRows, savedToSheet };

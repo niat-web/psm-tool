@@ -12,10 +12,12 @@ import {
   isPollingAbortedError,
   waitForJobCompletion,
 } from "../utils/jobPolling";
-import type { ApiResult, AssessmentIndividualRow, AssessmentZipRow } from "../types";
+import type { AiProvider, ApiResult, AssessmentIndividualRow, AssessmentZipRow } from "../types";
 
 type AssessmentsPageProps = {
   product: string;
+  provider: AiProvider;
+  onProviderChange: (provider: AiProvider) => void;
 };
 
 const createZipRow = (index: number): AssessmentZipRow => ({
@@ -32,7 +34,7 @@ const createIndividualRow = (index: number): AssessmentIndividualRow => ({
   assessment_date: new Date().toISOString().slice(0, 10),
 });
 
-export function AssessmentsPage({ product }: AssessmentsPageProps) {
+export function AssessmentsPage({ product, provider, onProviderChange }: AssessmentsPageProps) {
   const [tab, setTab] = useState<"ZIP File Processor" | "Individual File Processor">("ZIP File Processor");
   const [zipRows, setZipRows] = useState<AssessmentZipRow[]>([createZipRow(0)]);
   const [individualRows, setIndividualRows] = useState<AssessmentIndividualRow[]>([createIndividualRow(0)]);
@@ -61,7 +63,7 @@ export function AssessmentsPage({ product }: AssessmentsPageProps) {
       setError(null);
       setResult(null);
       setLiveStatus("Submitting ZIP assessment job...");
-      const started = await startAssessmentsZipJob(zipRows, product);
+      const started = await startAssessmentsZipJob(zipRows, product, provider);
       setActiveJobId(started.jobId);
       const response = await waitForJobCompletion(
         started.jobId,
@@ -105,7 +107,7 @@ export function AssessmentsPage({ product }: AssessmentsPageProps) {
       setError(null);
       setResult(null);
       setLiveStatus("Submitting individual assessment job...");
-      const started = await startAssessmentsIndividualJob(individualRows, product);
+      const started = await startAssessmentsIndividualJob(individualRows, product, provider);
       setActiveJobId(started.jobId);
       const response = await waitForJobCompletion(
         started.jobId,
@@ -161,6 +163,17 @@ export function AssessmentsPage({ product }: AssessmentsPageProps) {
     <div className="page-section">
       <section className="panel">
         <h3>Assessments</h3>
+        <div className="field-row">
+          <label htmlFor="assessments-provider">API</label>
+          <select
+            id="assessments-provider"
+            value={provider}
+            onChange={(event) => onProviderChange(event.target.value as AiProvider)}
+          >
+            <option value="mistral">Mistral API</option>
+            <option value="openai">OpenAI API</option>
+          </select>
+        </div>
 
         <div className="tab-row">
           <button className={tab === "ZIP File Processor" ? "tab active" : "tab"} onClick={() => setTab("ZIP File Processor")}> 

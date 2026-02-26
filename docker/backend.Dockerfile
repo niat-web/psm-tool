@@ -21,7 +21,7 @@ COPY package*.json ./
 RUN npm ci --legacy-peer-deps --omit=dev
 COPY --from=build /app/backend/dist ./backend/dist
 COPY backend/prompts ./backend/prompts
-COPY curriculum.pdf ./curriculum.pdf
+COPY curriculum.txt ./curriculum.txt
 EXPOSE 4000
 CMD ["node", "backend/dist/server.js"]
 

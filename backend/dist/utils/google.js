@@ -59,6 +59,10 @@ const ensureSheetExists = async (sheets, sheetName) => {
 const normalizeRows = (rows, headers) => {
     return rows.map((row) => headers.map((header) => String(row[header] ?? "N/A")));
 };
+const toPositiveNumber = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
 const appendRowsWithHeaders = async (args) => {
     if (args.rows.length === 0) {
         return true;
@@ -104,23 +108,74 @@ const appendRowsWithHeaders = async (args) => {
     }
 };
 exports.appendRowsWithHeaders = appendRowsWithHeaders;
-const downloadDriveFileToPath = async (fileId, outputPath) => {
+const downloadDriveFileToPath = async (fileId, outputPath, onProgress) => {
     const drive = getDrive();
     if (!drive) {
         return "Credentials Error";
     }
     try {
         (0, fs_1.ensureDir)(node_path_1.default.dirname(outputPath));
+        let totalBytes = null;
+        try {
+            const metadata = await drive.files.get({
+                fileId,
+                fields: "size",
+                supportsAllDrives: true,
+            });
+            totalBytes = toPositiveNumber(metadata.data.size);
+        }
+        catch {
+            totalBytes = null;
+        }
         const response = await drive.files.get({
             fileId,
             alt: "media",
+            supportsAllDrives: true,
         }, {
             responseType: "stream",
         });
+        if (!totalBytes) {
+            const headerLength = response.headers?.["content-length"];
+            totalBytes = Array.isArray(headerLength)
+                ? toPositiveNumber(headerLength[0])
+                : toPositiveNumber(headerLength);
+        }
+        let loadedBytes = 0;
+        let lastEmittedPercent = -1;
+        const emitProgress = (force = false) => {
+            if (!onProgress)
+                return;
+            const percent = totalBytes
+                ? Math.min(100, Math.round((loadedBytes / totalBytes) * 100))
+                : loadedBytes > 0
+                    ? 0
+                    : 0;
+            if (!force && percent === lastEmittedPercent) {
+                return;
+            }
+            lastEmittedPercent = percent;
+            onProgress({
+                percent,
+                loadedBytes,
+                totalBytes: totalBytes ?? undefined,
+            });
+        };
+        emitProgress(true);
         await new Promise((resolve, reject) => {
             const stream = node_fs_1.default.createWriteStream(outputPath);
+            stream.on("error", (error) => reject(error));
+            stream.on("finish", () => {
+                if (totalBytes && loadedBytes < totalBytes) {
+                    loadedBytes = totalBytes;
+                }
+                emitProgress(true);
+                resolve();
+            });
             response.data
-                .on("end", () => resolve())
+                .on("data", (chunk) => {
+                loadedBytes += chunk.length;
+                emitProgress();
+            })
                 .on("error", (error) => reject(error))
                 .pipe(stream);
         });

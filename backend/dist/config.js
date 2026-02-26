@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MISTRAL_MODELS = exports.MISTRAL_URLS = exports.GITHUB_GIST_TOKEN = exports.getMistralTranscribeKey = exports.getMistralChatKeys = exports.getServiceAccountCredentials = exports.APP_DIRS = exports.QNA_CHUNK_OVERLAP = exports.QNA_CHUNK_SIZE = exports.MISTRAL_CHAT_MAX_RETRIES_PER_KEY = exports.MISTRAL_CHAT_MIN_INTERVAL_SECONDS = exports.SHEET_NAMES = exports.GSHEET_ID = exports.PRODUCT_OPTIONS = void 0;
+exports.MISTRAL_MODELS = exports.MISTRAL_URLS = exports.GITHUB_GIST_TOKEN = exports.getMistralTranscribeKey = exports.getMistralChatKeys = exports.getServiceAccountCredentials = exports.APP_DIRS = exports.DRILLDOWN_CURRICULUM_SNIPPET_LENGTH = exports.DRILLDOWN_ANALYSIS_MAX_CONCURRENCY = exports.QNA_CHUNK_OVERLAP = exports.QNA_CHUNK_SIZE = exports.MISTRAL_CHAT_MAX_RETRIES_PER_KEY = exports.MISTRAL_CHAT_MIN_INTERVAL_SECONDS = exports.SHEET_NAMES = exports.GSHEET_ID = exports.PRODUCT_OPTIONS = void 0;
 const node_fs_1 = __importDefault(require("node:fs"));
 exports.PRODUCT_OPTIONS = [
     "Intensive",
@@ -30,6 +30,8 @@ exports.MISTRAL_CHAT_MIN_INTERVAL_SECONDS = parseNumber(process.env.MISTRAL_CHAT
 exports.MISTRAL_CHAT_MAX_RETRIES_PER_KEY = parseNumber(process.env.MISTRAL_CHAT_MAX_RETRIES_PER_KEY, 4);
 exports.QNA_CHUNK_SIZE = parseNumber(process.env.QNA_CHUNK_SIZE, 18000);
 exports.QNA_CHUNK_OVERLAP = parseNumber(process.env.QNA_CHUNK_OVERLAP, 1200);
+exports.DRILLDOWN_ANALYSIS_MAX_CONCURRENCY = Math.max(1, Math.floor(parseNumber(process.env.DRILLDOWN_ANALYSIS_MAX_CONCURRENCY, 5)));
+exports.DRILLDOWN_CURRICULUM_SNIPPET_LENGTH = Math.max(1000, Math.floor(parseNumber(process.env.DRILLDOWN_CURRICULUM_SNIPPET_LENGTH, 15000)));
 exports.APP_DIRS = {
     downloadedVideos: "DownloadedVideos",
     generatedTranscripts: "GeneratedTranscripts",

@@ -4,9 +4,10 @@ import AdmZip from "adm-zip";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
 import { appendRowsWithHeaders } from "../utils/google";
-import { mistralChatJson, mistralJsonAsArray, mistralOcr } from "../utils/mistral";
+import { aiChatJson, aiJsonAsArray, aiOcr } from "../utils/aiProvider";
 import { SHEET_NAMES } from "../config";
-import type { AssessmentIndividualInput, AssessmentZipInput } from "../types";
+import type { AiProvider, AssessmentIndividualInput, AssessmentZipInput } from "../types";
+import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
 
 const INITIAL_QUESTION_EXTRACTION_PROMPT = `
 You are an Expert Technical Interview Data Extractor.
@@ -125,7 +126,10 @@ type ExtractedQuestion = {
   curriculum_coverage?: string;
 };
 
-const extractInitialQuestions = async (rawText: string): Promise<ExtractedQuestion[]> => {
+const extractInitialQuestions = async (
+  runtime: ProviderRuntimeConfig,
+  rawText: string,
+): Promise<ExtractedQuestion[]> => {
   if (!rawText || rawText.trim().length < 5) {
     return [];
   }
@@ -133,7 +137,8 @@ const extractInitialQuestions = async (rawText: string): Promise<ExtractedQuesti
   const safeText = rawText.slice(0, 100000);
   const prompt = INITIAL_QUESTION_EXTRACTION_PROMPT.replace("{raw_text_safe}", safeText);
 
-  const response = await mistralChatJson(
+  const response = await aiChatJson(
+    runtime,
     [{ role: "user", content: prompt }],
     { responseAsJsonObject: true, temperature: 0.1, timeoutMs: 90000 },
   );
@@ -150,6 +155,7 @@ const extractInitialQuestions = async (rawText: string): Promise<ExtractedQuesti
 };
 
 const classifyExtractedQuestions = async (
+  runtime: ProviderRuntimeConfig,
   qnaList: ExtractedQuestion[],
   curriculumContext: string,
   abortIfCancelled?: () => void,
@@ -171,7 +177,8 @@ const classifyExtractedQuestions = async (
     const batch = qnaList.slice(index, index + batchSize);
     const userContent = JSON.stringify(batch);
 
-    const classified = await mistralJsonAsArray(
+    const classified = await aiJsonAsArray(
+      runtime,
       [
         { role: "system", content: prompt },
         { role: "user", content: userContent },
@@ -228,6 +235,7 @@ const processAssessmentFile = async (args: {
   fileName: string;
   fileBuffer: Buffer;
   mimeType?: string;
+  runtime: ProviderRuntimeConfig;
   jobId: string;
   companyName: string;
   assessmentDate: string;
@@ -238,7 +246,7 @@ const processAssessmentFile = async (args: {
 }): Promise<Array<Record<string, string>>> => {
   args.abortIfCancelled?.();
   args.onStatus?.(`Running OCR for ${args.fileName}...`);
-  const ocr = await mistralOcr({
+  const ocr = await aiOcr(args.runtime, {
     fileName: args.fileName,
     fileBuffer: args.fileBuffer,
     mimeType: args.mimeType,
@@ -250,7 +258,7 @@ const processAssessmentFile = async (args: {
   }
 
   args.onStatus?.(`Extracting questions from ${args.fileName}...`);
-  const initialQuestions = await extractInitialQuestions(ocr.fullText);
+  const initialQuestions = await extractInitialQuestions(args.runtime, ocr.fullText);
   args.abortIfCancelled?.();
   if (initialQuestions.length === 0) {
     return [];
@@ -258,6 +266,7 @@ const processAssessmentFile = async (args: {
 
   args.onStatus?.(`Classifying questions from ${args.fileName}...`);
   const classified = await classifyExtractedQuestions(
+    args.runtime,
     initialQuestions,
     args.curriculumContext,
     args.abortIfCancelled,
@@ -288,10 +297,12 @@ export const analyzeAssessmentIndividual = async (args: {
   rows: AssessmentIndividualInput[];
   files: Map<string, Express.Multer.File>;
   product: string;
+  provider: AiProvider;
   onStatus?: (message: string) => void;
   abortIfCancelled?: () => void;
 }): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean }> => {
   args.abortIfCancelled?.();
+  const runtime = await getRuntimeProviderConfig(args.provider);
   args.onStatus?.("Loading curriculum context...");
   const curriculumContext = await getCurriculumSnippet(15000);
   args.abortIfCancelled?.();
@@ -310,6 +321,7 @@ export const analyzeAssessmentIndividual = async (args: {
       fileName: file.originalname,
       fileBuffer: file.buffer,
       mimeType: file.mimetype,
+      runtime,
       jobId: row.job_id?.trim() || "N/A",
       companyName: row.company_name?.trim() || "N/A",
       assessmentDate: row.assessment_date || new Date().toISOString().slice(0, 10),
@@ -339,10 +351,12 @@ export const analyzeAssessmentZip = async (args: {
   rows: AssessmentZipInput[];
   files: Map<string, Express.Multer.File>;
   product: string;
+  provider: AiProvider;
   onStatus?: (message: string) => void;
   abortIfCancelled?: () => void;
 }): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean }> => {
   args.abortIfCancelled?.();
+  const runtime = await getRuntimeProviderConfig(args.provider);
   args.onStatus?.("Loading curriculum context...");
   const curriculumContext = await getCurriculumSnippet(15000);
   args.abortIfCancelled?.();
@@ -373,6 +387,7 @@ export const analyzeAssessmentZip = async (args: {
       const extracted = await processAssessmentFile({
         fileName: path.basename(entry.entryName),
         fileBuffer,
+        runtime,
         jobId: row.job_id?.trim() || "N/A",
         companyName: row.company_name?.trim() || "N/A",
         assessmentDate: row.assessment_date || new Date().toISOString().slice(0, 10),

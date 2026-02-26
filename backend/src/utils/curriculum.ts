@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PDFParse } from "pdf-parse";
 
 let cachedCurriculumText: string | null = null;
 
@@ -9,18 +8,14 @@ export const getCurriculumText = async (): Promise<string> => {
     return cachedCurriculumText;
   }
 
-  const pdfPath = path.resolve(process.cwd(), "curriculum.pdf");
-  if (!fs.existsSync(pdfPath)) {
+  const textPath = path.resolve(process.cwd(), "curriculum.txt");
+  if (!fs.existsSync(textPath)) {
     cachedCurriculumText = "";
     return cachedCurriculumText;
   }
 
   try {
-    const fileBuffer = fs.readFileSync(pdfPath);
-    const parser = new PDFParse({ data: fileBuffer });
-    const parsed = await parser.getText();
-    await parser.destroy();
-    cachedCurriculumText = parsed.text?.trim() ?? "";
+    cachedCurriculumText = fs.readFileSync(textPath, "utf8").trim();
   } catch {
     cachedCurriculumText = "";
   }

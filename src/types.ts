@@ -6,6 +6,24 @@ export type AppConfig = {
   interviewModules: string[];
 };
 
+export type AiProvider = "mistral" | "openai";
+
+export type ProviderSettingsEntry = {
+  apiKey: string;
+  chatEndpoint: string;
+  ocrEndpoint: string;
+  transcribeEndpoint: string;
+  chatModel: string;
+  ocrModel: string;
+  transcribeModel: string;
+};
+
+export type ProviderSettings = {
+  mistral: ProviderSettingsEntry;
+  openai: ProviderSettingsEntry;
+  updatedAt: string;
+};
+
 export type ApiResult = {
   rows: Array<Record<string, string>>;
   savedToSheet: boolean;

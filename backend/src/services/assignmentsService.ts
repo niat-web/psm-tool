@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
 import { appendRowsWithHeaders } from "../utils/google";
-import { mistralChatJson } from "../utils/mistral";
+import { aiChatJson } from "../utils/aiProvider";
 import { smartFetchContent } from "../utils/contentExtraction";
 import { SHEET_NAMES } from "../config";
-import type { AssignmentInputRow } from "../types";
+import type { AiProvider, AssignmentInputRow } from "../types";
+import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
 
 const SHEET_HEADERS = [
   "job_id",
@@ -59,7 +60,8 @@ FIELDS TO EXTRACT:
 `;
 };
 
-const runMistralAssignmentAnalysis = async (
+const runAssignmentAnalysis = async (
+  runtime: ProviderRuntimeConfig,
   systemPrompt: string,
   content: string,
 ): Promise<Record<string, unknown> | null> => {
@@ -72,7 +74,8 @@ const runMistralAssignmentAnalysis = async (
   const userPrompt = `Analyze this assignment text:\n---\n${cleanContent}\n---`;
 
   try {
-    const parsed = await mistralChatJson(
+    const parsed = await aiChatJson(
+      runtime,
       [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -93,10 +96,12 @@ const runMistralAssignmentAnalysis = async (
 export const analyzeAssignments = async (
   rows: AssignmentInputRow[],
   product: string,
+  provider: AiProvider,
   onStatus?: (message: string) => void,
   abortIfCancelled?: () => void,
 ): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean }> => {
   abortIfCancelled?.();
+  const runtime = await getRuntimeProviderConfig(provider);
   onStatus?.("Loading curriculum context...");
   const systemPrompt = await buildSystemPrompt();
   abortIfCancelled?.();
@@ -115,10 +120,10 @@ export const analyzeAssignments = async (
     const assignmentDate = String(row.assignment_date ?? nowDate()).trim() || nowDate();
 
     onStatus?.(`Fetching assignment content ${currentRow}/${totalRows}...`);
-    const extractedText = await smartFetchContent(link);
+    const extractedText = await smartFetchContent(link, runtime);
     abortIfCancelled?.();
     onStatus?.(`Analyzing assignment ${currentRow}/${totalRows}...`);
-    const analysis = await runMistralAssignmentAnalysis(systemPrompt, extractedText);
+    const analysis = await runAssignmentAnalysis(runtime, systemPrompt, extractedText);
     abortIfCancelled?.();
 
     let questionText = "FAILED: Content empty or unrecognizable";

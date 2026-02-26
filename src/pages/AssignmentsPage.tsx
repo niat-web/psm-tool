@@ -13,9 +13,17 @@ import {
   waitForJobCompletion,
 } from "../utils/jobPolling";
 import { normalizeAssignmentsCsvRows, parseAssignmentsFromPaste, parseCsvRows } from "../utils/parsers";
-import type { ApiResult, AssignmentInputRow } from "../types";
+import type { AiProvider, ApiResult, AssignmentInputRow } from "../types";
 
-export function AssignmentsPage({ product }: { product: string }) {
+export function AssignmentsPage({
+  product,
+  provider,
+  onProviderChange,
+}: {
+  product: string;
+  provider: AiProvider;
+  onProviderChange: (provider: AiProvider) => void;
+}) {
   const [inputMethod, setInputMethod] = useState<"Paste Text" | "Upload CSV">("Paste Text");
   const [pasteText, setPasteText] = useState("");
   const [rows, setRows] = useState<AssignmentInputRow[]>([]);
@@ -57,7 +65,7 @@ export function AssignmentsPage({ product }: { product: string }) {
       setError(null);
       setResult(null);
       setLiveStatus("Submitting assignments job...");
-      const started = await startAssignmentsJob(rows, product);
+      const started = await startAssignmentsJob(rows, product, provider);
       setActiveJobId(started.jobId);
       const response = await waitForJobCompletion(
         started.jobId,
@@ -113,6 +121,17 @@ export function AssignmentsPage({ product }: { product: string }) {
     <div className="page-section">
       <section className="panel">
         <h3>Assignments</h3>
+        <div className="field-row">
+          <label htmlFor="assignments-provider">API</label>
+          <select
+            id="assignments-provider"
+            value={provider}
+            onChange={(event) => onProviderChange(event.target.value as AiProvider)}
+          >
+            <option value="mistral">Mistral API</option>
+            <option value="openai">OpenAI API</option>
+          </select>
+        </div>
 
         <div className="inline-controls">
           <label>

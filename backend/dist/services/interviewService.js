@@ -52,7 +52,6 @@ const CLASSIFY_FIELDS = [
     "relevancy_score",
     "curriculum_coverage",
 ];
-const nowDate = () => new Date().toISOString().slice(0, 10);
 const nowDateTime = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 const cleanupFiles = (paths) => {
     const unique = [...new Set(paths.map((item) => item.trim()).filter((item) => item.length > 0))];
@@ -189,7 +188,63 @@ const generateTranscript = async (audioPath, outputPath, onStatus, abortIfCancel
     const cleaned = (0, media_1.cleanTranscriptHallucinations)(transcriptBuffer.trim());
     (0, fs_1.writeTextFile)(outputPath, cleaned);
 };
-const downloadViaPublicDrive = async (fileId, outputPath) => {
+const toPositiveNumber = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+const downloadFetchResponseToPath = async (response, outputPath, onProgress) => {
+    if (!response.body) {
+        return false;
+    }
+    const totalBytes = toPositiveNumber(response.headers.get("content-length"));
+    let loadedBytes = 0;
+    let lastPercent = -1;
+    const emitProgress = (force = false) => {
+        if (!onProgress)
+            return;
+        const percent = totalBytes
+            ? Math.min(100, Math.round((loadedBytes / totalBytes) * 100))
+            : loadedBytes > 0
+                ? 0
+                : 0;
+        if (!force && percent === lastPercent) {
+            return;
+        }
+        lastPercent = percent;
+        onProgress({
+            percent,
+            loadedBytes,
+            totalBytes: totalBytes ?? undefined,
+        });
+    };
+    emitProgress(true);
+    const reader = response.body.getReader();
+    const output = await node_fs_1.default.promises.open(outputPath, "w");
+    try {
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            if (!value || value.byteLength === 0) {
+                continue;
+            }
+            loadedBytes += value.byteLength;
+            await output.write(value);
+            emitProgress();
+        }
+        if (totalBytes && loadedBytes < totalBytes) {
+            loadedBytes = totalBytes;
+        }
+        emitProgress(true);
+    }
+    finally {
+        reader.releaseLock();
+        await output.close();
+    }
+    return true;
+};
+const downloadViaPublicDrive = async (fileId, outputPath, onProgress) => {
     const url = `https://drive.google.com/uc?export=download&id=${fileId}`;
     try {
         const response = await fetch(url, { redirect: "follow" });
@@ -208,13 +263,9 @@ const downloadViaPublicDrive = async (fileId, outputPath) => {
             if (!confirmResponse.ok) {
                 return false;
             }
-            const buffer = Buffer.from(await confirmResponse.arrayBuffer());
-            node_fs_1.default.writeFileSync(outputPath, buffer);
-            return true;
+            return downloadFetchResponseToPath(confirmResponse, outputPath, onProgress);
         }
-        const buffer = Buffer.from(await response.arrayBuffer());
-        node_fs_1.default.writeFileSync(outputPath, buffer);
-        return true;
+        return downloadFetchResponseToPath(response, outputPath, onProgress);
     }
     catch {
         return false;
@@ -257,7 +308,7 @@ const mapQaToSheetRows = (args) => {
         drive_file_id: args.meta.driveFileId,
         curriculum_coverage: (0, enum_1.forceEnumFormat)(item.curriculum_coverage ?? "N/A"),
         question_uid: (0, node_crypto_1.randomUUID)().replace(/-/g, ""),
-        interview_date: nowDate(),
+        interview_date: args.meta.interviewDate,
         question_creation_datetime: nowDateTime(),
         source_type: args.meta.sourceType,
         product: args.meta.product,
@@ -306,6 +357,10 @@ const processInterviewRow = async (args) => {
     const jobId = String(args.row.job_id ?? "N/A").trim();
     const company = String(args.row.company_name ?? "N/A").trim();
     const interviewRound = String(args.row.interview_round ?? "N/A").trim();
+    const interviewDate = String(args.row.interview_date ?? "").trim();
+    if (!interviewDate) {
+        throw new Error("Missing interview_date for interview analyzer row.");
+    }
     const rawStart = parseTime(args.row.clip_start_time);
     const rawEnd = parseTime(args.row.clip_end_time);
     const processFullVideo = rawEnd === null;
@@ -321,15 +376,23 @@ const processInterviewRow = async (args) => {
     }
     if (!node_fs_1.default.existsSync(videoPath)) {
         args.abortIfCancelled?.();
-        args.onStatus?.(`${candidatePrefix}: downloading video...`);
-        const publicDownloadOk = await downloadViaPublicDrive(fileId, videoPath);
+        args.onStatus?.(`${candidatePrefix}: downloading video...`, { progress: { percent: 0 } });
+        const publicDownloadOk = await downloadViaPublicDrive(fileId, videoPath, (progress) => {
+            args.onStatus?.(`${candidatePrefix}: downloading video...`, { progress });
+        });
         args.abortIfCancelled?.();
         videoValidation = (0, media_1.validateVideoFile)(videoPath);
         if (!publicDownloadOk || !videoValidation.ok) {
             if (node_fs_1.default.existsSync(videoPath))
                 (0, fs_1.safeRemoveFile)(videoPath);
-            args.onStatus?.(`${candidatePrefix}: trying Drive API download...`);
-            const driveResult = await (0, google_1.downloadDriveFileToPath)(fileId, videoPath);
+            const fallbackReason = !publicDownloadOk
+                ? "public download request failed"
+                : `downloaded file invalid (${videoValidation.reason})`;
+            args.onStatus?.(`${candidatePrefix}: public download failed (${fallbackReason}), switching to Drive API...`, { progress: { percent: 0 } });
+            args.onStatus?.(`${candidatePrefix}: trying Drive API download...`, { progress: { percent: 0 } });
+            const driveResult = await (0, google_1.downloadDriveFileToPath)(fileId, videoPath, (progress) => {
+                args.onStatus?.(`${candidatePrefix}: trying Drive API download...`, { progress });
+            });
             args.abortIfCancelled?.();
             if (driveResult !== "Success") {
                 (0, fs_1.safeRemoveFile)(videoPath);
@@ -356,7 +419,8 @@ const processInterviewRow = async (args) => {
         }
         endTime = duration;
     }
-    const baseName = `${fileId}_${Math.floor(startTime)}_${Math.floor(endTime)}`;
+    const baseName = `${fileId}_${Math.floor(startTime)}_${Math.floor(endTime)}_` +
+        `${args.runToken}_${args.rowIndex}`;
     const audioPath = node_path_1.default.join(config_1.APP_DIRS.downloadedVideos, `${baseName}.mp3`);
     const transcriptPath = node_path_1.default.join(config_1.APP_DIRS.generatedTranscripts, `${baseName}.txt`);
     const qnaCsvPath = node_path_1.default.join(config_1.APP_DIRS.qa, `${baseName}_consolidated.csv`);
@@ -397,6 +461,7 @@ const processInterviewRow = async (args) => {
             jobId,
             companyName: company,
             interviewRound,
+            interviewDate,
             clipStart: startTime,
             clipEnd: endTime,
             videoLink: videoUrl,
@@ -410,7 +475,7 @@ const processInterviewRow = async (args) => {
     saveQaCsv(qnaCsvPath, rows);
     return {
         rows,
-        cleanupPaths: [videoPath, audioPath, transcriptPath, qnaCsvPath],
+        cleanupPaths: [audioPath, transcriptPath, qnaCsvPath],
     };
 };
 const runInterviewAnalyzer = async (args) => {
@@ -429,12 +494,14 @@ const runInterviewAnalyzer = async (args) => {
     const finalRows = [];
     const cleanupPaths = [];
     const totalRows = args.rows.length;
+    const runToken = (0, node_crypto_1.randomUUID)().replace(/-/g, "").slice(0, 12);
     let rowIndex = 0;
     for (const row of args.rows) {
         args.abortIfCancelled?.();
         rowIndex += 1;
         const processed = await processInterviewRow({
             row,
+            runToken,
             qnaPrompt,
             classifyPrompt,
             product: args.product,
@@ -446,8 +513,10 @@ const runInterviewAnalyzer = async (args) => {
         finalRows.push(...processed.rows);
         cleanupPaths.push(...processed.cleanupPaths);
         args.onStatus?.(`Candidate ${rowIndex}/${totalRows}: completed.`, {
-            rows: ensureHeaderOrder(finalRows),
-            savedToSheet: false,
+            partialResult: {
+                rows: ensureHeaderOrder(finalRows),
+                savedToSheet: false,
+            },
         });
     }
     args.abortIfCancelled?.();
@@ -469,6 +538,10 @@ const runVideoUploader = async (args) => {
     args.abortIfCancelled?.();
     args.onStatus?.("Preparing local video uploader...");
     (0, fs_1.ensureDirs)(Object.values(config_1.APP_DIRS));
+    const interviewDate = String(args.metadata.interview_date ?? "").trim();
+    if (!interviewDate) {
+        throw new Error("Missing interview_date in video uploader metadata.");
+    }
     if (!(0, media_1.checkFfmpegInstalled)()) {
         throw new Error("FFmpeg is not installed.");
     }
@@ -479,11 +552,13 @@ const runVideoUploader = async (args) => {
     const classifyTemplate = (0, prompts_1.loadClassifyPromptTemplate)();
     const classifyPrompt = classifyTemplate.replace("{{CURRICULUM_CONTEXT}}", curriculum);
     const timestamp = Date.now();
+    const uploadToken = (0, node_crypto_1.randomUUID)().replace(/-/g, "").slice(0, 8);
     args.abortIfCancelled?.();
     args.onStatus?.("Saving uploaded video...");
-    const sourceVideoPath = node_path_1.default.join(config_1.APP_DIRS.downloadedVideos, args.uploadedFile.originalname);
+    const uploadExt = node_path_1.default.extname(args.uploadedFile.originalname) || ".mp4";
+    const sourceVideoPath = node_path_1.default.join(config_1.APP_DIRS.downloadedVideos, `uploaded_${timestamp}_${uploadToken}${uploadExt}`);
     node_fs_1.default.writeFileSync(sourceVideoPath, args.uploadedFile.buffer);
-    const baseName = `${args.metadata.user_id || "candidate"}_${timestamp}`;
+    const baseName = `${args.metadata.user_id || "candidate"}_${timestamp}_${uploadToken}`;
     const audioPath = node_path_1.default.join(config_1.APP_DIRS.downloadedVideos, `${baseName}.mp3`);
     const transcriptPath = node_path_1.default.join(config_1.APP_DIRS.generatedTranscripts, `${baseName}.txt`);
     if (!node_fs_1.default.existsSync(audioPath)) {
@@ -521,6 +596,7 @@ const runVideoUploader = async (args) => {
             jobId: String(args.metadata.job_id ?? "N/A"),
             companyName: String(args.metadata.company_name ?? "N/A"),
             interviewRound: String(args.metadata.interview_round ?? "N/A"),
+            interviewDate,
             clipStart: 0,
             clipEnd,
             videoLink: "Local Upload",

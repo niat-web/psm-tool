@@ -1,6 +1,8 @@
 export type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 export type JsonObject = { [key: string]: JsonValue };
 
+export type AiProvider = "mistral" | "openai";
+
 export type ProductOption =
   | "Intensive"
   | "Academy"

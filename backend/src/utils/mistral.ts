@@ -19,6 +19,8 @@ type ChatOptions = {
   responseAsJsonObject?: boolean;
   maxRetriesPerKey?: number;
   timeoutMs?: number;
+  apiKey?: string;
+  allowKeyFallback?: boolean;
 };
 
 type OcrResult = {
@@ -91,7 +93,14 @@ export const mistralChat = async (
   messages: MistralChatMessage[],
   options: ChatOptions = {},
 ): Promise<string> => {
-  const keys = getRotatedChatKeys();
+  const explicitKey = options.apiKey?.trim();
+  const configuredKeys = getMistralChatKeys();
+  const keys = explicitKey
+    ? options.allowKeyFallback === false
+      ? [explicitKey]
+      : [explicitKey, ...configuredKeys.filter((value) => value !== explicitKey)]
+    : getRotatedChatKeys();
+
   if (keys.length === 0) {
     throw new Error("No Mistral API keys configured.");
   }

@@ -207,6 +207,25 @@ body,
   min-width: 220px;
 }
 
+.field-two-col-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field-row-stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.field-row-stacked select {
+  width: 100%;
+  min-width: 0;
+}
+
 .inline-controls {
   display: flex;
   gap: 14px;
@@ -378,6 +397,36 @@ button:disabled {
   color: var(--muted);
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.provider-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #fbfdff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.provider-card h4 {
+  margin: 0;
+  color: #20405f;
+  font-size: 16px;
+}
+
+.provider-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .button-row {
   display: flex;
   gap: 10px;
@@ -459,6 +508,10 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
   .live-status-progress-inline {
     flex-basis: 100%;
     width: 100%;
@@ -478,6 +531,10 @@ button:disabled {
   .field-row select {
     min-width: 0;
     width: 100%;
+  }
+
+  .field-two-col-row {
+    grid-template-columns: 1fr;
   }
 }
 

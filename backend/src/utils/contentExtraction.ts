@@ -1,6 +1,7 @@
 import { load as loadHtml } from "cheerio";
 import { PDFParse } from "pdf-parse";
-import { mistralOcr } from "./mistral";
+import type { ProviderRuntimeConfig } from "../services/settingsService";
+import { aiOcr } from "./aiProvider";
 
 const HEADERS = {
   "User-Agent":
@@ -29,7 +30,11 @@ const parsePdfText = async (buffer: Buffer): Promise<string> => {
   }
 };
 
-const extractTextWithFallback = async (buffer: Buffer, extension: string): Promise<string> => {
+const extractTextWithFallback = async (
+  buffer: Buffer,
+  extension: string,
+  runtime: ProviderRuntimeConfig,
+): Promise<string> => {
   const normalizedExt = extension.toLowerCase();
 
   if (normalizedExt === "pdf") {
@@ -38,7 +43,7 @@ const extractTextWithFallback = async (buffer: Buffer, extension: string): Promi
       return parsed;
     }
 
-    const ocr = await mistralOcr({
+    const ocr = await aiOcr(runtime, {
       fileName: "assignment.pdf",
       fileBuffer: buffer,
       mimeType: "application/pdf",
@@ -47,7 +52,7 @@ const extractTextWithFallback = async (buffer: Buffer, extension: string): Promi
   }
 
   if (["jpg", "jpeg", "png", "webp", "bmp", "tiff"].includes(normalizedExt)) {
-    const ocr = await mistralOcr({
+    const ocr = await aiOcr(runtime, {
       fileName: `assignment.${normalizedExt}`,
       fileBuffer: buffer,
     });
@@ -57,7 +62,7 @@ const extractTextWithFallback = async (buffer: Buffer, extension: string): Promi
   return buffer.toString("utf8");
 };
 
-const tryFetchText = async (url: string): Promise<string> => {
+const tryFetchText = async (url: string, runtime: ProviderRuntimeConfig): Promise<string> => {
   const response = await fetch(url, {
     headers: HEADERS,
     redirect: "follow",
@@ -71,11 +76,11 @@ const tryFetchText = async (url: string): Promise<string> => {
   const buffer = Buffer.from(await response.arrayBuffer());
 
   if (contentType.includes("pdf")) {
-    return extractTextWithFallback(buffer, "pdf");
+    return extractTextWithFallback(buffer, "pdf", runtime);
   }
 
   if (contentType.includes("image")) {
-    return extractTextWithFallback(buffer, "png");
+    return extractTextWithFallback(buffer, "png", runtime);
   }
 
   if (contentType.includes("html")) {
@@ -85,7 +90,7 @@ const tryFetchText = async (url: string): Promise<string> => {
   return buffer.toString("utf8");
 };
 
-const extractGooglePublicPdf = async (url: string): Promise<string> => {
+const extractGooglePublicPdf = async (url: string, runtime: ProviderRuntimeConfig): Promise<string> => {
   const fileId = extractGoogleFileId(url);
   if (!fileId) {
     return "Error: Bad URL";
@@ -96,24 +101,27 @@ const extractGooglePublicPdf = async (url: string): Promise<string> => {
     : `https://drive.google.com/uc?id=${fileId}&export=download`;
 
   try {
-    return await tryFetchText(downloadUrl);
+    return await tryFetchText(downloadUrl, runtime);
   } catch (error) {
     return `Public Access Error: ${String(error)}`;
   }
 };
 
-const extractSharepointContent = async (url: string): Promise<string> => {
+const extractSharepointContent = async (url: string, runtime: ProviderRuntimeConfig): Promise<string> => {
   const cleanUrl = url.split("?")[0];
   const downloadUrl = `${cleanUrl}?download=1`;
 
   try {
-    return await tryFetchText(downloadUrl);
+    return await tryFetchText(downloadUrl, runtime);
   } catch (error) {
     return `SharePoint Error: ${String(error)}`;
   }
 };
 
-export const smartFetchContent = async (urlInput: string): Promise<string> => {
+export const smartFetchContent = async (
+  urlInput: string,
+  runtime: ProviderRuntimeConfig,
+): Promise<string> => {
   const url = urlInput.trim();
   if (!url) {
     return "Error: Empty URL";
@@ -123,7 +131,7 @@ export const smartFetchContent = async (urlInput: string): Promise<string> => {
 
   try {
     if (urlLower.includes("docs.google.com/document")) {
-      return extractGooglePublicPdf(url);
+      return extractGooglePublicPdf(url, runtime);
     }
 
     if (urlLower.includes("drive.google.com")) {
@@ -131,14 +139,14 @@ export const smartFetchContent = async (urlInput: string): Promise<string> => {
         return "Error: Drive Folders not supported.";
       }
 
-      return extractGooglePublicPdf(url);
+      return extractGooglePublicPdf(url, runtime);
     }
 
     if (urlLower.includes("sharepoint.com") || urlLower.includes("1drv.ms")) {
-      return extractSharepointContent(url);
+      return extractSharepointContent(url, runtime);
     }
 
-    return tryFetchText(url);
+    return tryFetchText(url, runtime);
   } catch (error) {
     return `Web Error: ${String(error)}`;
   }

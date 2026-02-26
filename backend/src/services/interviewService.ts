@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { APP_DIRS, QNA_CHUNK_OVERLAP, QNA_CHUNK_SIZE, SHEET_NAMES } from "../config";
+import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
 import { ensureDirs, readTextFileIfExists, safeRemoveFile, writeTextFile } from "../utils/fs";
@@ -18,9 +19,9 @@ import {
   splitAudioIntoChunks,
   validateVideoFile,
 } from "../utils/media";
-import { mistralChat, mistralTranscribeAudio } from "../utils/mistral";
+import { aiChat, aiTranscribeAudio } from "../utils/aiProvider";
 import { loadClassifyPromptTemplate, loadQnaPrompt } from "../utils/prompts";
-import type { InterviewInputRow, QaItem, VideoUploaderMetadata } from "../types";
+import type { AiProvider, InterviewInputRow, QaItem, VideoUploaderMetadata } from "../types";
 
 const SHEET_HEADERS = [
   "user_id",
@@ -98,8 +99,13 @@ const parseModelResultAsArray = (content: string): Record<string, unknown>[] => 
   }
 };
 
-const getMistralCompletion = async (prompt: string, content: string): Promise<string> => {
-  const response = await mistralChat(
+const getChatCompletion = async (
+  runtime: ProviderRuntimeConfig,
+  prompt: string,
+  content: string,
+): Promise<string> => {
+  const response = await aiChat(
+    runtime,
     [
       { role: "system", content: `${prompt} Return ONLY valid JSON. No markdown.` },
       { role: "user", content },
@@ -154,6 +160,7 @@ const mergeClassification = (original: QaItem[], classified: Array<Record<string
 };
 
 const classifyQnaList = async (
+  runtime: ProviderRuntimeConfig,
   qna: QaItem[],
   classifyPrompt: string,
   batchSize = 12,
@@ -167,7 +174,7 @@ const classifyQnaList = async (
     abortIfCancelled?.();
     const batch = qna.slice(index, index + batchSize);
     const content = JSON.stringify(batch);
-    const response = await getMistralCompletion(classifyPrompt, content);
+    const response = await getChatCompletion(runtime, classifyPrompt, content);
     abortIfCancelled?.();
     classified.push(...parseModelResultAsArray(response));
   }
@@ -176,6 +183,7 @@ const classifyQnaList = async (
 };
 
 const processLargeTranscriptWithOverlap = async (
+  runtime: ProviderRuntimeConfig,
   transcript: string,
   prompt: string,
   chunkSize = 12000,
@@ -199,7 +207,7 @@ const processLargeTranscriptWithOverlap = async (
     const chunk = transcript.slice(start, end);
     const content = `Analyze this interview segment:\n\n${chunk}`;
 
-    const response = await getMistralCompletion(prompt, content);
+    const response = await getChatCompletion(runtime, prompt, content);
     abortIfCancelled?.();
     const parsed = parseModelResultAsArray(response);
 
@@ -220,6 +228,7 @@ const processLargeTranscriptWithOverlap = async (
 };
 
 const generateTranscript = async (
+  runtime: ProviderRuntimeConfig,
   audioPath: string,
   outputPath: string,
   onStatus?: (message: string) => void,
@@ -235,7 +244,7 @@ const generateTranscript = async (
     abortIfCancelled?.();
     chunkIndex += 1;
     onStatus?.(`Generating transcript chunk ${chunkIndex}/${totalChunks}...`);
-    const segments = await mistralTranscribeAudio(chunk);
+    const segments = await aiTranscribeAudio(runtime, chunk);
     abortIfCancelled?.();
     transcriptBuffer += `${mistralSegmentsToCleanText(segments, offset)}\n`;
 
@@ -425,6 +434,7 @@ const ensureHeaderOrder = (rows: Array<Record<string, string>>): Array<Record<st
 };
 
 const runQnaPipeline = async (args: {
+  runtime: ProviderRuntimeConfig;
   transcriptText: string;
   qnaPrompt: string;
   classifyPrompt: string;
@@ -432,6 +442,7 @@ const runQnaPipeline = async (args: {
 }): Promise<QaItem[]> => {
   args.abortIfCancelled?.();
   const raw = await processLargeTranscriptWithOverlap(
+    args.runtime,
     args.transcriptText,
     args.qnaPrompt,
     QNA_CHUNK_SIZE,
@@ -441,7 +452,7 @@ const runQnaPipeline = async (args: {
   args.abortIfCancelled?.();
 
   const deduped = deduplicateQna(raw);
-  return classifyQnaList(deduped, args.classifyPrompt, 12, args.abortIfCancelled);
+  return classifyQnaList(args.runtime, deduped, args.classifyPrompt, 12, args.abortIfCancelled);
 };
 
 const saveQaCsv = (filePath: string, rows: Array<Record<string, string>>): void => {
@@ -468,6 +479,7 @@ const saveQaCsv = (filePath: string, rows: Array<Record<string, string>>): void 
 };
 
 const processInterviewRow = async (args: {
+  runtime: ProviderRuntimeConfig;
   row: InterviewInputRow;
   runToken: string;
   qnaPrompt: string;
@@ -576,7 +588,7 @@ const processInterviewRow = async (args: {
   if (!fs.existsSync(transcriptPath)) {
     args.abortIfCancelled?.();
     args.onStatus?.(`${candidatePrefix}: generating transcript...`);
-    await generateTranscript(audioPath, transcriptPath, args.onStatus, args.abortIfCancelled);
+    await generateTranscript(args.runtime, audioPath, transcriptPath, args.onStatus, args.abortIfCancelled);
   }
   args.abortIfCancelled?.();
 
@@ -592,6 +604,7 @@ const processInterviewRow = async (args: {
   args.abortIfCancelled?.();
   args.onStatus?.(`${candidatePrefix}: extracting Q&A...`);
   const qaItems = await runQnaPipeline({
+    runtime: args.runtime,
     transcriptText,
     qnaPrompt: args.qnaPrompt,
     classifyPrompt: args.classifyPrompt,
@@ -630,12 +643,14 @@ const processInterviewRow = async (args: {
 export const runInterviewAnalyzer = async (args: {
   rows: InterviewInputRow[];
   product: string;
+  provider: AiProvider;
   onStatus?: StatusUpdateCallback;
   abortIfCancelled?: () => void;
 }): Promise<InterviewAnalysisResult> => {
   args.abortIfCancelled?.();
   args.onStatus?.("Preparing interview analyzer...");
   ensureDirs(Object.values(APP_DIRS));
+  const runtime = await getRuntimeProviderConfig(args.provider);
 
   if (!checkFfmpegInstalled()) {
     throw new Error("FFmpeg is not installed.");
@@ -658,6 +673,7 @@ export const runInterviewAnalyzer = async (args: {
     args.abortIfCancelled?.();
     rowIndex += 1;
     const processed = await processInterviewRow({
+      runtime,
       row,
       runToken,
       qnaPrompt,
@@ -698,12 +714,14 @@ export const runVideoUploader = async (args: {
   metadata: VideoUploaderMetadata;
   uploadedFile: Express.Multer.File;
   product: string;
+  provider: AiProvider;
   onStatus?: StatusUpdateCallback;
   abortIfCancelled?: () => void;
 }): Promise<InterviewAnalysisResult> => {
   args.abortIfCancelled?.();
   args.onStatus?.("Preparing local video uploader...");
   ensureDirs(Object.values(APP_DIRS));
+  const runtime = await getRuntimeProviderConfig(args.provider);
 
   const interviewDate = String(args.metadata.interview_date ?? "").trim();
   if (!interviewDate) {
@@ -742,7 +760,7 @@ export const runVideoUploader = async (args: {
   if (!fs.existsSync(transcriptPath)) {
     args.abortIfCancelled?.();
     args.onStatus?.("Generating transcript...");
-    await generateTranscript(audioPath, transcriptPath, args.onStatus, args.abortIfCancelled);
+    await generateTranscript(runtime, audioPath, transcriptPath, args.onStatus, args.abortIfCancelled);
   }
   args.abortIfCancelled?.();
 
@@ -755,6 +773,7 @@ export const runVideoUploader = async (args: {
 
   args.onStatus?.("Extracting and classifying Q&A...");
   const qaItems = await runQnaPipeline({
+    runtime,
     transcriptText,
     qnaPrompt,
     classifyPrompt,

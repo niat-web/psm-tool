@@ -1,8 +1,10 @@
 import type {
+  AiProvider,
   ApiResult,
   AppConfig,
   AssignmentInputRow,
   AssessmentIndividualRow,
+  ProviderSettings,
   AssessmentZipRow,
   InterviewInputRow,
   JobStatusResponse,
@@ -112,6 +114,17 @@ export const fetchAppConfig = async (): Promise<AppConfig> => {
   return parseJson<AppConfig>(response, url);
 };
 
+export const fetchProviderSettings = async (): Promise<ProviderSettings> => {
+  const url = toApiUrl("/settings/provider-config");
+  const response = await fetchWithTimeout(url, undefined, CONFIG_TIMEOUT_MS);
+  await assertResponse(response, url);
+  return parseJson<ProviderSettings>(response, url);
+};
+
+export const saveProviderSettings = async (settings: ProviderSettings): Promise<ProviderSettings> => {
+  return postJson<ProviderSettings>("/settings/provider-config", settings, CONFIG_TIMEOUT_MS);
+};
+
 export const fetchJobStatus = async (jobId: string): Promise<JobStatusResponse> => {
   const url = toApiUrl(`/jobs/${jobId}`);
   const response = await fetchWithTimeout(url, undefined, JOB_STATUS_TIMEOUT_MS);
@@ -128,17 +141,22 @@ export const cancelJob = async (jobId: string): Promise<JobStatusResponse> => {
   return parseJson<JobStatusResponse>(response, url);
 };
 
-export const analyzeInterviewRows = (rows: InterviewInputRow[], product: string): Promise<ApiResult> => {
-  return postJson<ApiResult>("/interview/analyzer", { rows, product });
+export const analyzeInterviewRows = (
+  rows: InterviewInputRow[],
+  product: string,
+  provider: AiProvider,
+): Promise<ApiResult> => {
+  return postJson<ApiResult>("/interview/analyzer", { rows, product, provider });
 };
 
 export const startInterviewAnalyzerJob = (
   rows: InterviewInputRow[],
   product: string,
+  provider: AiProvider,
 ): Promise<StartJobResponse> => {
   return postJson<StartJobResponse>(
     "/interview/analyzer/start",
-    { rows, product },
+    { rows, product, provider },
     START_REQUEST_TIMEOUT_MS,
   );
 };
@@ -147,10 +165,12 @@ export const analyzeVideoUploader = async (args: {
   metadata: VideoUploaderMetadata;
   file: File;
   product: string;
+  provider: AiProvider;
 }): Promise<ApiResult> => {
   const formData = new FormData();
   formData.append("metadata", JSON.stringify(args.metadata));
   formData.append("product", args.product);
+  formData.append("provider", args.provider);
   formData.append("video", args.file);
 
   const url = toApiUrl("/interview/video-uploader");
@@ -167,10 +187,12 @@ export const startVideoUploaderJob = async (args: {
   metadata: VideoUploaderMetadata;
   file: File;
   product: string;
+  provider: AiProvider;
 }): Promise<StartJobResponse> => {
   const formData = new FormData();
   formData.append("metadata", JSON.stringify(args.metadata));
   formData.append("product", args.product);
+  formData.append("provider", args.provider);
   formData.append("video", args.file);
 
   const url = toApiUrl("/interview/video-uploader/start");
@@ -183,17 +205,22 @@ export const startVideoUploaderJob = async (args: {
   return parseJson<StartJobResponse>(response, url);
 };
 
-export const analyzeDrilldownRows = (rows: Array<Record<string, string>>, product: string): Promise<ApiResult> => {
-  return postJson<ApiResult>("/drilldown/analyze", { rows, product });
+export const analyzeDrilldownRows = (
+  rows: Array<Record<string, string>>,
+  product: string,
+  provider: AiProvider,
+): Promise<ApiResult> => {
+  return postJson<ApiResult>("/drilldown/analyze", { rows, product, provider });
 };
 
 export const startDrilldownJob = (
   rows: Array<Record<string, string>>,
   product: string,
+  provider: AiProvider,
 ): Promise<StartJobResponse> => {
   return postJson<StartJobResponse>(
     "/drilldown/analyze/start",
-    { rows, product },
+    { rows, product, provider },
     START_REQUEST_TIMEOUT_MS,
   );
 };
@@ -201,17 +228,19 @@ export const startDrilldownJob = (
 export const analyzeAssignmentsRows = (
   rows: AssignmentInputRow[],
   product: string,
+  provider: AiProvider,
 ): Promise<ApiResult> => {
-  return postJson<ApiResult>("/assignments/analyze", { rows, product });
+  return postJson<ApiResult>("/assignments/analyze", { rows, product, provider });
 };
 
 export const startAssignmentsJob = (
   rows: AssignmentInputRow[],
   product: string,
+  provider: AiProvider,
 ): Promise<StartJobResponse> => {
   return postJson<StartJobResponse>(
     "/assignments/analyze/start",
-    { rows, product },
+    { rows, product, provider },
     START_REQUEST_TIMEOUT_MS,
   );
 };
@@ -219,9 +248,11 @@ export const startAssignmentsJob = (
 export const analyzeAssessmentsZip = async (
   rows: AssessmentZipRow[],
   product: string,
+  provider: AiProvider,
 ): Promise<ApiResult> => {
   const formData = new FormData();
   formData.append("product", product);
+  formData.append("provider", provider);
 
   const normalizedRows = rows
     .filter((row) => row.file)
@@ -253,9 +284,11 @@ export const analyzeAssessmentsZip = async (
 export const startAssessmentsZipJob = async (
   rows: AssessmentZipRow[],
   product: string,
+  provider: AiProvider,
 ): Promise<StartJobResponse> => {
   const formData = new FormData();
   formData.append("product", product);
+  formData.append("provider", provider);
 
   const normalizedRows = rows
     .filter((row) => row.file)
@@ -287,9 +320,11 @@ export const startAssessmentsZipJob = async (
 export const analyzeAssessmentsIndividual = async (
   rows: AssessmentIndividualRow[],
   product: string,
+  provider: AiProvider,
 ): Promise<ApiResult> => {
   const formData = new FormData();
   formData.append("product", product);
+  formData.append("provider", provider);
 
   const normalizedRows = rows
     .filter((row) => row.file)
@@ -321,9 +356,11 @@ export const analyzeAssessmentsIndividual = async (
 export const startAssessmentsIndividualJob = async (
   rows: AssessmentIndividualRow[],
   product: string,
+  provider: AiProvider,
 ): Promise<StartJobResponse> => {
   const formData = new FormData();
   formData.append("product", product);
+  formData.append("provider", provider);
 
   const normalizedRows = rows
     .filter((row) => row.file)

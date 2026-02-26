@@ -55,7 +55,13 @@ const extractChatContent = (responseJson) => {
     return responseJson?.choices?.[0]?.message?.content ?? "";
 };
 const mistralChat = async (messages, options = {}) => {
-    const keys = getRotatedChatKeys();
+    const explicitKey = options.apiKey?.trim();
+    const configuredKeys = (0, config_1.getMistralChatKeys)();
+    const keys = explicitKey
+        ? options.allowKeyFallback === false
+            ? [explicitKey]
+            : [explicitKey, ...configuredKeys.filter((value) => value !== explicitKey)]
+        : getRotatedChatKeys();
     if (keys.length === 0) {
         throw new Error("No Mistral API keys configured.");
     }

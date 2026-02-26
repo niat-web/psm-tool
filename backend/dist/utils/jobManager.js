@@ -34,15 +34,21 @@ const createJob = (runner) => {
         updatedAt: nowIso(),
     };
     jobs.set(id, initial);
-    const update = (message, partialResult) => {
+    const update = (message, payload) => {
         const current = jobs.get(id);
         if (!current)
             return;
         if (current.state === "cancelled")
             return;
         current.message = message;
-        if (partialResult !== undefined) {
-            current.partialResult = partialResult;
+        if (payload?.partialResult !== undefined) {
+            current.partialResult = payload.partialResult;
+        }
+        if (payload && "progress" in payload) {
+            current.progress = payload.progress ?? undefined;
+        }
+        else {
+            current.progress = undefined;
         }
         current.updatedAt = nowIso();
         if (current.state === "queued") {
@@ -67,11 +73,13 @@ const createJob = (runner) => {
         if (current.cancelRequested) {
             current.state = "cancelled";
             current.message = "Cancelled by user.";
+            current.progress = undefined;
             current.updatedAt = nowIso();
             return;
         }
         current.state = "running";
         current.message = "Started...";
+        current.progress = undefined;
         current.updatedAt = nowIso();
         try {
             const result = await runner(update, control);
@@ -81,6 +89,7 @@ const createJob = (runner) => {
             if (done.cancelRequested || done.state === "cancelled") {
                 done.state = "cancelled";
                 done.message = "Cancelled by user.";
+                done.progress = undefined;
                 done.updatedAt = nowIso();
                 return;
             }
@@ -88,6 +97,7 @@ const createJob = (runner) => {
             done.result = result;
             done.partialResult = result;
             done.message = "Completed.";
+            done.progress = undefined;
             done.updatedAt = nowIso();
         }
         catch (error) {
@@ -97,12 +107,14 @@ const createJob = (runner) => {
             if (failed.cancelRequested || failed.state === "cancelled" || error instanceof JobCancelledError) {
                 failed.state = "cancelled";
                 failed.message = "Cancelled by user.";
+                failed.progress = undefined;
                 failed.updatedAt = nowIso();
                 return;
             }
             failed.state = "error";
             failed.error = String(error);
             failed.message = failed.error;
+            failed.progress = undefined;
             failed.updatedAt = nowIso();
         }
     })();
@@ -125,6 +137,7 @@ const cancelJob = (id) => {
     job.cancelRequested = true;
     job.state = "cancelled";
     job.message = "Cancelled by user.";
+    job.progress = undefined;
     job.updatedAt = nowIso();
     return job;
 };

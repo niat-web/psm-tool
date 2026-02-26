@@ -6,23 +6,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCurriculumSnippet = exports.getCurriculumText = void 0;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
-const pdf_parse_1 = require("pdf-parse");
 let cachedCurriculumText = null;
 const getCurriculumText = async () => {
     if (cachedCurriculumText !== null) {
         return cachedCurriculumText;
     }
-    const pdfPath = node_path_1.default.resolve(process.cwd(), "curriculum.pdf");
-    if (!node_fs_1.default.existsSync(pdfPath)) {
+    const textPath = node_path_1.default.resolve(process.cwd(), "curriculum.txt");
+    if (!node_fs_1.default.existsSync(textPath)) {
         cachedCurriculumText = "";
         return cachedCurriculumText;
     }
     try {
-        const fileBuffer = node_fs_1.default.readFileSync(pdfPath);
-        const parser = new pdf_parse_1.PDFParse({ data: fileBuffer });
-        const parsed = await parser.getText();
-        await parser.destroy();
-        cachedCurriculumText = parsed.text?.trim() ?? "";
+        cachedCurriculumText = node_fs_1.default.readFileSync(textPath, "utf8").trim();
     }
     catch {
         cachedCurriculumText = "";
