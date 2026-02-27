@@ -1,58 +1,66 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import "./DocumentationPage.css";
 
-const documentationMarkdown = `
-# PsmTool
+type DocumentationModeId = "interview" | "drilldown" | "assessments" | "assignments";
 
-# 1) PRODUCT SELECTOR (Global)
+type DocumentationMode = {
+  id: DocumentationModeId;
+  label: string;
+  markdown: string;
+};
 
-**Input Type:** Dropdown
+const templateSheetUrl =
+  "https://docs.google.com/spreadsheets/d/10rLUKCucmgrLSS--TgW8dP8zpkeN_ugIjkDlvgAOpMU/edit?gid=1586920339#gid=1586920339";
 
-**Field:**
+const productSelectorMarkdown = `
+## Product Selector (Global)
 
-- \`product\` -> Select from:
-  - Intensive
-  - Academy
-  - External
-  - Academy Edge
-  - Nxtwave Edge
-  - NIAT
-  - Intensive Offline
-  - Experienced Hiring
+**Input Type:** Dropdown  
+**Field:** \`product\`
 
----
+Available values:
 
-# 2) INTERVIEW ANALYSER
+- Intensive
+- Academy
+- External
+- Academy Edge
+- Nxtwave Edge
+- NIAT
+- Intensive Offline
+- Experienced Hiring
+`;
 
-## A) Drive-Based Interview Analyzer
+const documentationModes: DocumentationMode[] = [
+  {
+    id: "interview",
+    label: "Interview Analyser",
+    markdown: `
+## Drive-Based Interview Analyzer
 
 ### Input Method 1: Paste Text (Tab Separated)
 
-**Accepted Columns (7 / 8 / 9 columns supported)**
-
-**9 Columns Format (Recommended)**
+Accepted columns: **7 / 8 / 9 columns**  
+Recommended format:
 
 ~~~
 user_id	fullName	MobileNumber	interview_round	drive_file_id	job_id	company_name	clip_start_time	clip_end_time
 ~~~
 
-**Example**
+Example:
 
 ~~~
 U123	John Doe	9876543210	1	1gfZvlSqDriveID	JOB01	Google	0	300
 ~~~
 
----
-
 ### Input Method 2: Upload CSV
 
-**Mandatory Column**
+Mandatory column:
 
 - drive_file_id
 
-**Optional Columns**
+Optional columns:
 
 - user_id
 - fullName
@@ -63,11 +71,9 @@ U123	John Doe	9876543210	1	1gfZvlSqDriveID	JOB01	Google	0	300
 - clip_start_time
 - clip_end_time
 
----
+## Video Uploader (Local File)
 
-## B) Video Uploader (Local File)
-
-### Step 1: Paste Metadata (Tab Separated)
+### Step 1: Paste metadata (Tab Separated)
 
 ~~~
 user_id	fullName	MobileNumber	interview_round	drive_file_id	job_id	company_name	clip_start_time	clip_end_time
@@ -79,7 +85,7 @@ Example:
 U123	John Doe	9876543210	1	Local	JOB01	Google	0	600
 ~~~
 
-### Step 2: Upload Video File
+### Step 2: Upload video file
 
 Supported formats:
 
@@ -88,14 +94,15 @@ Supported formats:
 - avi
 - mkv
 - webm
-
----
-
-# 3) DRILLDOWN
-
+`,
+  },
+  {
+    id: "drilldown",
+    label: "Drilldown",
+    markdown: `
 ## Input: Upload CSV
 
-### Mandatory Columns
+### Mandatory columns
 
 ~~~
 Interview Date
@@ -106,7 +113,7 @@ Job ID
 Company Name
 ~~~
 
-### Round Columns (Any of These)
+### Round columns (any of these)
 
 ~~~
 Screening Questions
@@ -118,23 +125,22 @@ Cultural fit Round Questions
 Managerial Round questions
 CEO/Founder/Director Round Questions
 ~~~
-
----
-
-# 4) ASSESSMENTS
-
-## A) ZIP File Processor
+`,
+  },
+  {
+    id: "assessments",
+    label: "Assessments",
+    markdown: `
+## ZIP File Processor
 
 For each company row:
 
-### Input Fields
+- \`company_name\`: Text
+- \`job_id\`: Text
+- \`assessment_date\`: Date
+- \`uploaded_zip_file\`: \`.zip\`
 
-- \`company_name\` -> Text
-- \`job_id\` -> Text
-- \`assessment_date\` -> Date
-- \`uploaded_zip_file\` -> \`.zip\`
-
-### Supported file formats inside ZIP
+Supported files inside ZIP:
 
 - PDF
 - PNG
@@ -144,24 +150,21 @@ For each company row:
 - TIFF
 - BMP
 
----
-
-## B) Individual File Processor
+## Individual File Processor
 
 For each row:
 
-### Input Fields
-
-- \`job_id\` -> Text
-- \`company_name\` -> Text
-- \`assessment_date\` -> Date
-- \`uploaded_file\` -> PDF / PNG / JPG / JPEG / WEBP / TIFF / BMP
-
----
-
-# 5) ASSIGNMENTS
-
-## A) Paste Text (Tab Separated)
+- \`job_id\`: Text
+- \`company_name\`: Text
+- \`assessment_date\`: Date
+- \`uploaded_file\`: PDF / PNG / JPG / JPEG / WEBP / TIFF / BMP
+`,
+  },
+  {
+    id: "assignments",
+    label: "Assignments",
+    markdown: `
+## Paste Text (Tab Separated)
 
 ~~~
 job_id	company_name	assignment_link	assignment_date
@@ -173,11 +176,9 @@ Example:
 JOB123	Google	https://docs.google.com/...	2023-10-27
 ~~~
 
----
+## Upload CSV
 
-## B) Upload CSV
-
-### Required Columns
+Required columns:
 
 ~~~
 job_id
@@ -185,15 +186,9 @@ company_name
 assignment_link
 assignment_date
 ~~~
-
----
-
-If you want, we can also add:
-
-- Only output formats
-- Only sheet column formats
-- Quick validation rules for each input
-`;
+`,
+  },
+];
 
 const flattenText = (node: ReactNode): string => {
   if (typeof node === "string" || typeof node === "number") {
@@ -222,6 +217,10 @@ const slugify = (value: string): string => {
 };
 
 export function DocumentationPage() {
+  const [selectedMode, setSelectedMode] = useState<DocumentationModeId>("interview");
+  const currentMode =
+    documentationModes.find((mode) => mode.id === selectedMode) ?? documentationModes[0];
+
   useEffect(() => {
     document.body.classList.add("docs-body");
 
@@ -233,42 +232,61 @@ export function DocumentationPage() {
   return (
     <div className="docs-shell">
       <main className="docs-main">
-        <article className="docs-card">
-          <header className="docs-topbar">
-            <h1>PsmTool Documentation</h1>
-            <a href="/" className="docs-home-link">
-              Open App
-            </a>
-          </header>
+        <header className="docs-topbar">
+          <h1>PsmTool Documentation</h1>
+          <a href="/" className="docs-home-link">
+            Open App
+          </a>
+        </header>
 
-          <div className="docs-index" role="navigation" aria-label="Section quick links">
-            <a href="#1-product-selector-global">1) Product Selector</a>
-            <a href="#2-interview-analyser">2) Interview Analyser</a>
-            <a href="#3-drilldown">3) Drilldown</a>
-            <a href="#4-assessments">4) Assessments</a>
-            <a href="#5-assignments">5) Assignments</a>
-          </div>
+        <section className="docs-layout">
+          <aside className="docs-sidebar" aria-label="Documentation modes">
+            <p className="docs-sidebar-title">Modes</p>
+            {documentationModes.map((mode) => {
+              const isActive = mode.id === currentMode.id;
+              return (
+                <button
+                  type="button"
+                  key={mode.id}
+                  className={`docs-mode-button${isActive ? " active" : ""}`}
+                  onClick={() => setSelectedMode(mode.id)}
+                >
+                  {mode.label}
+                </button>
+              );
+            })}
+          </aside>
 
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              h1: ({ children }) => {
-                const id = slugify(flattenText(children));
-                return <h1 id={id}>{children}</h1>;
-              },
-              h2: ({ children }) => {
-                const id = slugify(flattenText(children));
-                return <h2 id={id}>{children}</h2>;
-              },
-              h3: ({ children }) => {
-                const id = slugify(flattenText(children));
-                return <h3 id={id}>{children}</h3>;
-              },
-            }}
-          >
-            {documentationMarkdown}
-          </ReactMarkdown>
-        </article>
+          <article className="docs-card">
+            <section className="docs-template-card" aria-label="Template sheet">
+              <h2>Template Sheet</h2>
+              <p>Use this sheet template while preparing documentation input data.</p>
+              <a href={templateSheetUrl} target="_blank" rel="noreferrer">
+                Open Template Sheet
+              </a>
+            </section>
+
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                h1: ({ children }) => {
+                  const id = slugify(flattenText(children));
+                  return <h1 id={id}>{children}</h1>;
+                },
+                h2: ({ children }) => {
+                  const id = slugify(flattenText(children));
+                  return <h2 id={id}>{children}</h2>;
+                },
+                h3: ({ children }) => {
+                  const id = slugify(flattenText(children));
+                  return <h3 id={id}>{children}</h3>;
+                },
+              }}
+            >
+              {`# ${currentMode.label}\n\n${productSelectorMarkdown}\n\n${currentMode.markdown}`}
+            </ReactMarkdown>
+          </article>
+        </section>
       </main>
     </div>
   );
