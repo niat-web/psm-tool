@@ -88,6 +88,7 @@ export const notifyJobCompleted = async (args: {
   jobName: string;
   rowsCount?: number;
   savedToSheet?: boolean;
+  savedToBigQuery?: boolean;
 }): Promise<void> => {
   const parts: string[] = [];
   if (typeof args.rowsCount === "number") {
@@ -95,6 +96,9 @@ export const notifyJobCompleted = async (args: {
   }
   if (typeof args.savedToSheet === "boolean") {
     parts.push(`Saved to sheet: ${args.savedToSheet ? "Yes" : "No"}`);
+  }
+  if (typeof args.savedToBigQuery === "boolean") {
+    parts.push(`Saved to BigQuery: ${args.savedToBigQuery ? "Yes" : "No"}`);
   }
 
   const body = parts.length > 0 ? parts.join(" | ") : "Processing completed.";
@@ -118,4 +122,3 @@ export const notifyJobFailed = async (args: {
     tag: `${args.jobName}-failed`,
   });
 };
-

@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
+import { appendRowsToBigQuery } from "../utils/bigquery";
 import { appendRowsWithHeaders } from "../utils/google";
 import { aiJsonAsArray } from "../utils/aiProvider";
 import type { JobUpdatePayload } from "../utils/jobManager";
-import { SHEET_NAMES } from "../config";
-import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
+import { BIGQUERY_TABLE_NAMES, SHEET_NAMES } from "../config";
+import { getRuntimeProviderConfig, getStorageSettings, type ProviderRuntimeConfig } from "./settingsService";
 import type { AiProvider } from "../types";
 
 const DRILLDOWN_PROMPT_TEMPLATE = `
@@ -104,6 +105,7 @@ const SHEET_HEADERS = [
 type DrilldownAnalysisResult = {
   rows: Array<Record<string, string>>;
   savedToSheet: boolean;
+  savedToBigQuery: boolean;
 };
 
 type StatusUpdateCallback = (
@@ -294,7 +296,7 @@ const analyzeCandidateRow = async (args: {
         sub_topic: subTopic,
         difficulty_level: forceEnumFormat(item.difficulty ?? item.difficulty_level ?? "MEDIUM"),
         curriculum_coverage: forceEnumFormat(item.curriculum_coverage ?? item.coverage ?? "N/A"),
-        question_uid: randomUUID().replace(/-/g, ""),
+        question_uid: randomUUID(),
         interview_date: dateVal,
         question_creation_datetime: nowDateTime(),
         product,
@@ -342,6 +344,7 @@ export const analyzeDrilldownRows = async (
     "{{CURRICULUM_CONTEXT}}",
     curriculumContext.trim() || "N/A",
   );
+  const storageSettings = await getStorageSettings();
   const baseRuntime = await getRuntimeProviderConfig(provider);
   const runtimePool =
     baseRuntime.provider === "mistral"
@@ -392,6 +395,7 @@ export const analyzeDrilldownRows = async (
       partialResult: {
         rows: orderRowsByHeaders(flattenCompletedRows()),
         savedToSheet: false,
+        savedToBigQuery: false,
       },
     });
   };
@@ -464,29 +468,65 @@ export const analyzeDrilldownRows = async (
   }
 
   abortIfCancelled?.();
-  onStatus?.("Saving drilldown results to sheet...", {
-    progress: { percent: 100 },
-    partialResult: {
+  let savedToSheet = false;
+  if (storageSettings.saveToSheets) {
+    onStatus?.("Saving drilldown results to sheet...", {
+      progress: { percent: 100 },
+      partialResult: {
+        rows: orderedRows,
+        savedToSheet: false,
+        savedToBigQuery: false,
+      },
+    });
+
+    savedToSheet = await appendRowsWithHeaders({
+      sheetName: SHEET_NAMES.drilldown,
+      headers: SHEET_HEADERS,
       rows: orderedRows,
-      savedToSheet: false,
-    },
-  });
+    });
+  } else {
+    onStatus?.("Sheet save is disabled in settings. Skipping sheet save.");
+  }
 
-  const savedToSheet = await appendRowsWithHeaders({
-    sheetName: SHEET_NAMES.drilldown,
-    headers: SHEET_HEADERS,
-    rows: orderedRows,
-  });
+  let savedToBigQuery = false;
+  if (storageSettings.saveToBigQuery) {
+    onStatus?.("Saving drilldown results to BigQuery...", {
+      progress: { percent: 100 },
+      partialResult: {
+        rows: orderedRows,
+        savedToSheet,
+        savedToBigQuery: false,
+      },
+    });
 
-  onStatus?.(savedToSheet ? "Drilldown analysis completed." : "Drilldown completed, but sheet save failed.", {
+    savedToBigQuery = await appendRowsToBigQuery({
+      tableName: BIGQUERY_TABLE_NAMES.drilldown,
+      rows: orderedRows,
+    });
+  } else {
+    onStatus?.("BigQuery save is disabled in settings. Skipping BigQuery save.");
+  }
+
+  const anyStorageEnabled = storageSettings.saveToSheets || storageSettings.saveToBigQuery;
+  const allRequestedSavesSucceeded =
+    (!storageSettings.saveToSheets || savedToSheet) &&
+    (!storageSettings.saveToBigQuery || savedToBigQuery);
+  const completionMessage = !anyStorageEnabled
+    ? "Drilldown analysis completed. Storage is disabled in settings."
+    : allRequestedSavesSucceeded
+      ? "Drilldown analysis completed."
+      : "Drilldown completed, but one or more enabled storage targets failed.";
+
+  onStatus?.(completionMessage, {
     progress: { percent: 100 },
     partialResult: {
       rows: orderedRows,
       savedToSheet,
+      savedToBigQuery,
     },
   });
 
-  return { rows: orderedRows, savedToSheet };
+  return { rows: orderedRows, savedToSheet, savedToBigQuery };
 };
 
 export const getDrilldownSampleCsv = (): string => {

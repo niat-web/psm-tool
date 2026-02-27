@@ -20,6 +20,16 @@ export const SHEET_NAMES = {
   assignments: "Assign_Q&A",
 } as const;
 
+export const BIGQUERY_PROJECT_ID = process.env.BIGQUERY_PROJECT_ID ?? process.env.GCP_PROJECT_ID ?? "";
+export const BIGQUERY_DATASET_ID = process.env.BIGQUERY_DATASET_ID ?? process.env.DATASET_ID ?? "";
+
+export const BIGQUERY_TABLE_NAMES = {
+  interview: process.env.BIGQUERY_TABLE_INTERVIEW ?? "interviews_analyzer_questions_from_psm_team",
+  drilldown: process.env.BIGQUERY_TABLE_DRILLDOWN ?? "drill_down_questions_from_psm_team",
+  assessments: process.env.BIGQUERY_TABLE_ASSESSMENTS ?? "assessment_questions_from_psm_team",
+  assignments: process.env.BIGQUERY_TABLE_ASSIGNMENTS ?? "assignment_questions_from_psm_team",
+} as const;
+
 const parseNumber = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -74,73 +84,178 @@ const normalizePrivateKey = (value: string | undefined): string | undefined => {
   return value.replace(/\\n/g, "\n");
 };
 
-const getInlineServiceAccountFromEnv = (): ServiceAccountCredentials | null => {
-  // Supports both recommended prefixed env vars and Streamlit-style plain keys.
-  const creds: ServiceAccountCredentials = {
-    type: getFirstEnv(["GCP_TYPE", "type"]) ?? "",
-    project_id: getFirstEnv(["GCP_PROJECT_ID", "project_id"]) ?? "",
-    private_key_id: getFirstEnv(["GCP_PRIVATE_KEY_ID", "private_key_id"]) ?? "",
-    private_key: normalizePrivateKey(getFirstEnv(["GCP_PRIVATE_KEY", "private_key"])) ?? "",
-    client_email: getFirstEnv(["GCP_CLIENT_EMAIL", "client_email"]) ?? "",
-    client_id: getFirstEnv(["GCP_CLIENT_ID", "client_id"]) ?? "",
-    auth_uri: getFirstEnv(["GCP_AUTH_URI", "auth_uri"]) ?? "",
-    token_uri: getFirstEnv(["GCP_TOKEN_URI", "token_uri"]) ?? "",
-    auth_provider_x509_cert_url:
-      getFirstEnv(["GCP_AUTH_PROVIDER_X509_CERT_URL", "auth_provider_x509_cert_url"]) ?? "",
-    client_x509_cert_url: getFirstEnv(["GCP_CLIENT_X509_CERT_URL", "client_x509_cert_url"]) ?? "",
-    universe_domain: getFirstEnv(["GCP_UNIVERSE_DOMAIN", "universe_domain"]),
-  };
+const REQUIRED_SERVICE_ACCOUNT_FIELDS: Array<keyof ServiceAccountCredentials> = [
+  "type",
+  "project_id",
+  "private_key_id",
+  "private_key",
+  "client_email",
+  "client_id",
+  "auth_uri",
+  "token_uri",
+  "auth_provider_x509_cert_url",
+  "client_x509_cert_url",
+];
 
-  const requiredFields: Array<keyof ServiceAccountCredentials> = [
-    "type",
-    "project_id",
-    "private_key_id",
-    "private_key",
-    "client_email",
-    "client_id",
-    "auth_uri",
-    "token_uri",
-    "auth_provider_x509_cert_url",
-    "client_x509_cert_url",
-  ];
-
-  const hasAllRequired = requiredFields.every((field) => {
+const isCompleteServiceAccount = (creds: ServiceAccountCredentials): boolean => {
+  return REQUIRED_SERVICE_ACCOUNT_FIELDS.every((field) => {
     const value = creds[field];
     return typeof value === "string" && value.trim().length > 0;
   });
+};
 
-  return hasAllRequired ? creds : null;
+type InlineServiceAccountKeyMap = {
+  type: string[];
+  project_id: string[];
+  private_key_id: string[];
+  private_key: string[];
+  client_email: string[];
+  client_id: string[];
+  auth_uri: string[];
+  token_uri: string[];
+  auth_provider_x509_cert_url: string[];
+  client_x509_cert_url: string[];
+  universe_domain: string[];
+};
+
+const DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP: InlineServiceAccountKeyMap = {
+  type: ["GCP_TYPE", "type"],
+  project_id: ["GCP_PROJECT_ID", "project_id"],
+  private_key_id: ["GCP_PRIVATE_KEY_ID", "private_key_id"],
+  private_key: ["GCP_PRIVATE_KEY", "private_key"],
+  client_email: ["GCP_CLIENT_EMAIL", "client_email"],
+  client_id: ["GCP_CLIENT_ID", "client_id"],
+  auth_uri: ["GCP_AUTH_URI", "auth_uri"],
+  token_uri: ["GCP_TOKEN_URI", "token_uri"],
+  auth_provider_x509_cert_url: ["GCP_AUTH_PROVIDER_X509_CERT_URL", "auth_provider_x509_cert_url"],
+  client_x509_cert_url: ["GCP_CLIENT_X509_CERT_URL", "client_x509_cert_url"],
+  universe_domain: ["GCP_UNIVERSE_DOMAIN", "universe_domain"],
+};
+
+const SHEETS_INLINE_SERVICE_ACCOUNT_KEY_MAP: InlineServiceAccountKeyMap = {
+  type: ["GCP_SHEETS_TYPE", "SHEETS_TYPE", ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.type],
+  project_id: ["GCP_SHEETS_PROJECT_ID", "SHEETS_PROJECT_ID", ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.project_id],
+  private_key_id: [
+    "GCP_SHEETS_PRIVATE_KEY_ID",
+    "SHEETS_PRIVATE_KEY_ID",
+    ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.private_key_id,
+  ],
+  private_key: ["GCP_SHEETS_PRIVATE_KEY", "SHEETS_PRIVATE_KEY", ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.private_key],
+  client_email: [
+    "GCP_SHEETS_CLIENT_EMAIL",
+    "SHEETS_CLIENT_EMAIL",
+    ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.client_email,
+  ],
+  client_id: ["GCP_SHEETS_CLIENT_ID", "SHEETS_CLIENT_ID", ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.client_id],
+  auth_uri: ["GCP_SHEETS_AUTH_URI", "SHEETS_AUTH_URI", ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.auth_uri],
+  token_uri: ["GCP_SHEETS_TOKEN_URI", "SHEETS_TOKEN_URI", ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.token_uri],
+  auth_provider_x509_cert_url: [
+    "GCP_SHEETS_AUTH_PROVIDER_X509_CERT_URL",
+    "SHEETS_AUTH_PROVIDER_X509_CERT_URL",
+    ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.auth_provider_x509_cert_url,
+  ],
+  client_x509_cert_url: [
+    "GCP_SHEETS_CLIENT_X509_CERT_URL",
+    "SHEETS_CLIENT_X509_CERT_URL",
+    ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.client_x509_cert_url,
+  ],
+  universe_domain: ["GCP_SHEETS_UNIVERSE_DOMAIN", "SHEETS_UNIVERSE_DOMAIN", ...DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP.universe_domain],
+};
+
+const toServiceAccountCredentials = (value: unknown): ServiceAccountCredentials | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const source = value as Record<string, unknown>;
+  const creds: ServiceAccountCredentials = {
+    type: String(source.type ?? "").trim(),
+    project_id: String(source.project_id ?? "").trim(),
+    private_key_id: String(source.private_key_id ?? "").trim(),
+    private_key: normalizePrivateKey(String(source.private_key ?? "").trim()) ?? "",
+    client_email: String(source.client_email ?? "").trim(),
+    client_id: String(source.client_id ?? "").trim(),
+    auth_uri: String(source.auth_uri ?? "").trim(),
+    token_uri: String(source.token_uri ?? "").trim(),
+    auth_provider_x509_cert_url: String(source.auth_provider_x509_cert_url ?? "").trim(),
+    client_x509_cert_url: String(source.client_x509_cert_url ?? "").trim(),
+    universe_domain:
+      source.universe_domain === undefined ? undefined : String(source.universe_domain).trim(),
+  };
+
+  return isCompleteServiceAccount(creds) ? creds : null;
+};
+
+const getInlineServiceAccountFromEnv = (
+  keyMap: InlineServiceAccountKeyMap = DEFAULT_INLINE_SERVICE_ACCOUNT_KEY_MAP,
+): ServiceAccountCredentials | null => {
+  const creds: ServiceAccountCredentials = {
+    type: getFirstEnv(keyMap.type) ?? "",
+    project_id: getFirstEnv(keyMap.project_id) ?? "",
+    private_key_id: getFirstEnv(keyMap.private_key_id) ?? "",
+    private_key: normalizePrivateKey(getFirstEnv(keyMap.private_key)) ?? "",
+    client_email: getFirstEnv(keyMap.client_email) ?? "",
+    client_id: getFirstEnv(keyMap.client_id) ?? "",
+    auth_uri: getFirstEnv(keyMap.auth_uri) ?? "",
+    token_uri: getFirstEnv(keyMap.token_uri) ?? "",
+    auth_provider_x509_cert_url: getFirstEnv(keyMap.auth_provider_x509_cert_url) ?? "",
+    client_x509_cert_url: getFirstEnv(keyMap.client_x509_cert_url) ?? "",
+    universe_domain: getFirstEnv(keyMap.universe_domain),
+  };
+
+  return isCompleteServiceAccount(creds) ? creds : null;
+};
+
+const getServiceAccountFromJsonEnv = (envKey: string): ServiceAccountCredentials | null => {
+  const json = process.env[envKey];
+  if (!json) {
+    return null;
+  }
+
+  try {
+    return toServiceAccountCredentials(JSON.parse(json));
+  } catch {
+    return null;
+  }
+};
+
+const getServiceAccountFromFileEnv = (envKey: string): ServiceAccountCredentials | null => {
+  const filePath = process.env[envKey];
+  if (!filePath || !fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    const data = fs.readFileSync(filePath, "utf8");
+    return toServiceAccountCredentials(JSON.parse(data));
+  } catch {
+    return null;
+  }
 };
 
 export const getServiceAccountCredentials = (): ServiceAccountCredentials | null => {
-  const json = process.env.GCP_SERVICE_ACCOUNT_JSON;
-  if (json) {
-    try {
-      const parsed = JSON.parse(json) as ServiceAccountCredentials;
-      if (parsed.private_key) {
-        parsed.private_key = normalizePrivateKey(parsed.private_key) ?? "";
-      }
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
+  return (
+    getServiceAccountFromJsonEnv("GCP_SERVICE_ACCOUNT_JSON") ??
+    getServiceAccountFromFileEnv("GCP_SERVICE_ACCOUNT_FILE") ??
+    getInlineServiceAccountFromEnv()
+  );
+};
 
-  const filePath = process.env.GCP_SERVICE_ACCOUNT_FILE;
-  if (filePath && fs.existsSync(filePath)) {
-    try {
-      const data = fs.readFileSync(filePath, "utf8");
-      const parsed = JSON.parse(data) as ServiceAccountCredentials;
-      if (parsed.private_key) {
-        parsed.private_key = normalizePrivateKey(parsed.private_key) ?? "";
-      }
-      return parsed;
-    } catch {
-      return null;
-    }
-  }
+export const getSheetsServiceAccountCredentials = (): ServiceAccountCredentials | null => {
+  return (
+    getServiceAccountFromJsonEnv("GCP_SHEETS_SERVICE_ACCOUNT_JSON") ??
+    getServiceAccountFromFileEnv("GCP_SHEETS_SERVICE_ACCOUNT_FILE") ??
+    getInlineServiceAccountFromEnv(SHEETS_INLINE_SERVICE_ACCOUNT_KEY_MAP) ??
+    getServiceAccountCredentials()
+  );
+};
 
-  return getInlineServiceAccountFromEnv();
+export const getBigQueryServiceAccountCredentials = (): ServiceAccountCredentials | null => {
+  return (
+    getServiceAccountFromJsonEnv("GCP_BIGQUERY_SERVICE_ACCOUNT_JSON") ??
+    getServiceAccountFromFileEnv("GCP_BIGQUERY_SERVICE_ACCOUNT_FILE") ??
+    getServiceAccountCredentials()
+  );
 };
 
 export const getMistralChatKeys = (): string[] => {

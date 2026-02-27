@@ -25,12 +25,15 @@ export type ProviderSettingsEntry = {
 export type ProviderSettings = {
   mistral: ProviderSettingsEntry;
   openai: ProviderSettingsEntry;
+  saveToSheets: boolean;
+  saveToBigQuery: boolean;
   updatedAt: string;
 };
 
 export type ApiResult = {
   rows: Array<Record<string, string>>;
   savedToSheet: boolean;
+  savedToBigQuery?: boolean;
 };
 
 export type JobState = "queued" | "running" | "success" | "error" | "cancelled";

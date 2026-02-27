@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
+import { appendRowsToBigQuery } from "../utils/bigquery";
 import { appendRowsWithHeaders } from "../utils/google";
 import { aiChatJson } from "../utils/aiProvider";
 import { smartFetchContent } from "../utils/contentExtraction";
-import { SHEET_NAMES } from "../config";
+import { BIGQUERY_TABLE_NAMES, SHEET_NAMES } from "../config";
 import type { AiProvider, AssignmentInputRow } from "../types";
-import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
+import { getRuntimeProviderConfig, getStorageSettings, type ProviderRuntimeConfig } from "./settingsService";
 
 const SHEET_HEADERS = [
   "job_id",
@@ -99,9 +100,10 @@ export const analyzeAssignments = async (
   provider: AiProvider,
   onStatus?: (message: string) => void,
   abortIfCancelled?: () => void,
-): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean }> => {
+): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean; savedToBigQuery: boolean }> => {
   abortIfCancelled?.();
   const runtime = await getRuntimeProviderConfig(provider);
+  const storageSettings = await getStorageSettings();
   onStatus?.("Loading curriculum context...");
   const systemPrompt = await buildSystemPrompt();
   abortIfCancelled?.();
@@ -150,7 +152,7 @@ export const analyzeAssignments = async (
       tech_stacks: forceEnumFormat(techStacks),
       difficulty_level: forceEnumFormat(difficultyLevel),
       curriculum_coverage: forceEnumFormat(curriculumCoverage),
-      question_uid: randomUUID().replace(/-/g, ""),
+      question_uid: randomUUID(),
       assignment_date: assignmentDate,
       question_creation_datetime: nowDateTime(),
       assignment_link: link,
@@ -167,12 +169,28 @@ export const analyzeAssignments = async (
   });
 
   abortIfCancelled?.();
-  onStatus?.("Saving assignment results to sheet...");
-  const savedToSheet = await appendRowsWithHeaders({
-    sheetName: SHEET_NAMES.assignments,
-    headers: SHEET_HEADERS,
-    rows: orderedRows,
-  });
+  let savedToSheet = false;
+  if (storageSettings.saveToSheets) {
+    onStatus?.("Saving assignment results to sheet...");
+    savedToSheet = await appendRowsWithHeaders({
+      sheetName: SHEET_NAMES.assignments,
+      headers: SHEET_HEADERS,
+      rows: orderedRows,
+    });
+  } else {
+    onStatus?.("Sheet save is disabled in settings. Skipping sheet save.");
+  }
 
-  return { rows: orderedRows, savedToSheet };
+  let savedToBigQuery = false;
+  if (storageSettings.saveToBigQuery) {
+    onStatus?.("Saving assignment results to BigQuery...");
+    savedToBigQuery = await appendRowsToBigQuery({
+      tableName: BIGQUERY_TABLE_NAMES.assignments,
+      rows: orderedRows,
+    });
+  } else {
+    onStatus?.("BigQuery save is disabled in settings. Skipping BigQuery save.");
+  }
+
+  return { rows: orderedRows, savedToSheet, savedToBigQuery };
 };

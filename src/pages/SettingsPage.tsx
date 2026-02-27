@@ -33,6 +33,8 @@ const defaultSettings: ProviderSettings = {
     ocrModel: "gpt-4.1-mini",
     transcribeModel: "gpt-4o-mini-transcribe",
   }),
+  saveToSheets: true,
+  saveToBigQuery: true,
   updatedAt: "",
 };
 
@@ -73,6 +75,13 @@ export function SettingsPage() {
         ...prev[provider],
         [field]: value,
       },
+    }));
+  };
+
+  const updateStorageToggle = (field: "saveToSheets" | "saveToBigQuery", value: boolean): void => {
+    setSettings((prev) => ({
+      ...prev,
+      [field]: value,
     }));
   };
 
@@ -199,6 +208,24 @@ export function SettingsPage() {
         <p className="muted">
           Configure global AI provider credentials and endpoints for all users.
         </p>
+        <div className="inline-controls">
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.saveToSheets}
+              onChange={(event) => updateStorageToggle("saveToSheets", event.target.checked)}
+            />
+            Save outputs to Sheets
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.saveToBigQuery}
+              onChange={(event) => updateStorageToggle("saveToBigQuery", event.target.checked)}
+            />
+            Save outputs to BigQuery
+          </label>
+        </div>
         <div className="settings-grid">
           {renderProviderCard("mistral", "Mistral")}
           {renderProviderCard("openai", "OpenAI")}

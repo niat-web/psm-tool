@@ -79,6 +79,7 @@ export function AssessmentsPage({ product, provider, onProviderChange }: Assessm
         jobName: "Assessments ZIP Processor",
         rowsCount: response.rows.length,
         savedToSheet: response.savedToSheet,
+        savedToBigQuery: response.savedToBigQuery,
       });
     } catch (err) {
       if (isPollingAbortedError(err)) {
@@ -123,6 +124,7 @@ export function AssessmentsPage({ product, provider, onProviderChange }: Assessm
         jobName: "Assessments Individual Processor",
         rowsCount: response.rows.length,
         savedToSheet: response.savedToSheet,
+        savedToBigQuery: response.savedToBigQuery,
       });
     } catch (err) {
       if (isPollingAbortedError(err)) {
@@ -371,6 +373,10 @@ export function AssessmentsPage({ product, provider, onProviderChange }: Assessm
             <div className="status-row">
               <span>Extracted rows: {result.rows.length}</span>
               <span>Saved to sheet: {result.savedToSheet ? "Yes" : "No"}</span>
+              <span>
+                Saved to BigQuery:{" "}
+                {typeof result.savedToBigQuery === "boolean" ? (result.savedToBigQuery ? "Yes" : "No") : "N/A"}
+              </span>
             </div>
             <button
               className="secondary-button"

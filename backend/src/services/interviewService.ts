@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { APP_DIRS, QNA_CHUNK_OVERLAP, QNA_CHUNK_SIZE, SHEET_NAMES } from "../config";
-import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
+import { APP_DIRS, BIGQUERY_TABLE_NAMES, QNA_CHUNK_OVERLAP, QNA_CHUNK_SIZE, SHEET_NAMES } from "../config";
+import { getRuntimeProviderConfig, getStorageSettings, type ProviderRuntimeConfig } from "./settingsService";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
 import { ensureDirs, readTextFileIfExists, safeRemoveFile, writeTextFile } from "../utils/fs";
 import { createPublicGist } from "../utils/gist";
+import { appendRowsToBigQuery } from "../utils/bigquery";
 import { appendRowsWithHeaders, downloadDriveFileToPath } from "../utils/google";
 import type { JobProgress, JobUpdatePayload } from "../utils/jobManager";
 import {
@@ -63,7 +64,11 @@ const CLASSIFY_FIELDS = [
 
 const nowDateTime = (): string => new Date().toISOString().slice(0, 19).replace("T", " ");
 
-type InterviewAnalysisResult = { rows: Array<Record<string, string>>; savedToSheet: boolean };
+type InterviewAnalysisResult = {
+  rows: Array<Record<string, string>>;
+  savedToSheet: boolean;
+  savedToBigQuery: boolean;
+};
 type StatusUpdateCallback = (message: string, payload?: JobUpdatePayload<InterviewAnalysisResult>) => void;
 type ProcessInterviewRowResult = { rows: Array<Record<string, string>>; cleanupPaths: string[] };
 
@@ -415,7 +420,7 @@ const mapQaToSheetRows = (args: {
     transcript_link: args.meta.transcriptLink,
     drive_file_id: args.meta.driveFileId,
     curriculum_coverage: forceEnumFormat(item.curriculum_coverage ?? "N/A"),
-    question_uid: randomUUID().replace(/-/g, ""),
+    question_uid: randomUUID(),
     interview_date: args.meta.interviewDate,
     question_creation_datetime: nowDateTime(),
     source_type: args.meta.sourceType,
@@ -651,6 +656,7 @@ export const runInterviewAnalyzer = async (args: {
   args.onStatus?.("Preparing interview analyzer...");
   ensureDirs(Object.values(APP_DIRS));
   const runtime = await getRuntimeProviderConfig(args.provider);
+  const storageSettings = await getStorageSettings();
 
   if (!checkFfmpegInstalled()) {
     throw new Error("FFmpeg is not installed.");
@@ -690,24 +696,46 @@ export const runInterviewAnalyzer = async (args: {
       partialResult: {
         rows: ensureHeaderOrder(finalRows),
         savedToSheet: false,
+        savedToBigQuery: false,
       },
     });
   }
 
   args.abortIfCancelled?.();
   const orderedRows = ensureHeaderOrder(finalRows);
-  args.onStatus?.("Saving interview rows to sheet...");
-  const savedToSheet = await appendRowsWithHeaders({
-    sheetName: SHEET_NAMES.interview,
-    headers: SHEET_HEADERS,
-    rows: orderedRows,
-  });
-  if (savedToSheet) {
+  let savedToSheet = false;
+  if (storageSettings.saveToSheets) {
+    args.onStatus?.("Saving interview rows to sheet...");
+    savedToSheet = await appendRowsWithHeaders({
+      sheetName: SHEET_NAMES.interview,
+      headers: SHEET_HEADERS,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("Sheet save is disabled in settings. Skipping sheet save.");
+  }
+
+  let savedToBigQuery = false;
+  if (storageSettings.saveToBigQuery) {
+    args.onStatus?.("Saving interview rows to BigQuery...");
+    savedToBigQuery = await appendRowsToBigQuery({
+      tableName: BIGQUERY_TABLE_NAMES.interview,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("BigQuery save is disabled in settings. Skipping BigQuery save.");
+  }
+
+  const allRequestedSavesSucceeded =
+    (!storageSettings.saveToSheets || savedToSheet) &&
+    (!storageSettings.saveToBigQuery || savedToBigQuery);
+
+  if (allRequestedSavesSucceeded) {
     args.onStatus?.("Cleaning up local interview artifacts...");
     cleanupFiles(cleanupPaths);
   }
 
-  return { rows: orderedRows, savedToSheet };
+  return { rows: orderedRows, savedToSheet, savedToBigQuery };
 };
 
 export const runVideoUploader = async (args: {
@@ -722,6 +750,7 @@ export const runVideoUploader = async (args: {
   args.onStatus?.("Preparing local video uploader...");
   ensureDirs(Object.values(APP_DIRS));
   const runtime = await getRuntimeProviderConfig(args.provider);
+  const storageSettings = await getStorageSettings();
 
   const interviewDate = String(args.metadata.interview_date ?? "").trim();
   if (!interviewDate) {
@@ -805,16 +834,37 @@ export const runVideoUploader = async (args: {
 
   const orderedRows = ensureHeaderOrder(rows);
   args.abortIfCancelled?.();
-  args.onStatus?.("Saving video uploader rows to sheet...");
-  const savedToSheet = await appendRowsWithHeaders({
-    sheetName: SHEET_NAMES.interview,
-    headers: SHEET_HEADERS,
-    rows: orderedRows,
-  });
-  if (savedToSheet) {
+  let savedToSheet = false;
+  if (storageSettings.saveToSheets) {
+    args.onStatus?.("Saving video uploader rows to sheet...");
+    savedToSheet = await appendRowsWithHeaders({
+      sheetName: SHEET_NAMES.interview,
+      headers: SHEET_HEADERS,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("Sheet save is disabled in settings. Skipping sheet save.");
+  }
+
+  let savedToBigQuery = false;
+  if (storageSettings.saveToBigQuery) {
+    args.onStatus?.("Saving video uploader rows to BigQuery...");
+    savedToBigQuery = await appendRowsToBigQuery({
+      tableName: BIGQUERY_TABLE_NAMES.interview,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("BigQuery save is disabled in settings. Skipping BigQuery save.");
+  }
+
+  const allRequestedSavesSucceeded =
+    (!storageSettings.saveToSheets || savedToSheet) &&
+    (!storageSettings.saveToBigQuery || savedToBigQuery);
+
+  if (allRequestedSavesSucceeded) {
     args.onStatus?.("Cleaning up local video uploader artifacts...");
     cleanupFiles([sourceVideoPath, audioPath, transcriptPath]);
   }
 
-  return { rows: orderedRows, savedToSheet };
+  return { rows: orderedRows, savedToSheet, savedToBigQuery };
 };

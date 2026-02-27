@@ -8,6 +8,8 @@ const PROVIDER_SETTINGS_ID = "ai_provider_config";
 export type ProviderSettings = {
   mistral: ProviderSettingsEntry;
   openai: ProviderSettingsEntry;
+  saveToSheets: boolean;
+  saveToBigQuery: boolean;
   updatedAt: string;
 };
 
@@ -40,6 +42,11 @@ export type ProviderRuntimeConfig = {
     ocr: string;
     transcribe: string;
   };
+};
+
+export type StorageSettings = {
+  saveToSheets: boolean;
+  saveToBigQuery: boolean;
 };
 
 type ProviderSettingsDocument = ProviderSettings & {
@@ -90,6 +97,13 @@ const normalizeString = (value: unknown, fallback = ""): string => {
   return value.trim();
 };
 
+const normalizeBoolean = (value: unknown, fallback: boolean): boolean => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return fallback;
+};
+
 const normalizeEntry = (value: unknown, fallback: ProviderSettingsEntry): ProviderSettingsEntry => {
   const source = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 
@@ -113,12 +127,16 @@ const normalizeSettings = (value: unknown, defaults?: ProviderSettings): Provide
   const fallback: ProviderSettings = defaults ?? {
     mistral: { ...MISTRAL_DEFAULTS },
     openai: { ...OPENAI_DEFAULTS },
+    saveToSheets: true,
+    saveToBigQuery: true,
     updatedAt: nowIso(),
   };
 
   return {
     mistral: normalizeEntry(source.mistral, fallback.mistral),
     openai: normalizeEntry(source.openai, fallback.openai),
+    saveToSheets: normalizeBoolean(source.saveToSheets, fallback.saveToSheets),
+    saveToBigQuery: normalizeBoolean(source.saveToBigQuery, fallback.saveToBigQuery),
     updatedAt: normalizeString(source.updatedAt, fallback.updatedAt),
   };
 };
@@ -126,6 +144,8 @@ const normalizeSettings = (value: unknown, defaults?: ProviderSettings): Provide
 const toPublicSettings = (document: ProviderSettingsDocument): ProviderSettings => ({
   mistral: document.mistral,
   openai: document.openai,
+  saveToSheets: document.saveToSheets,
+  saveToBigQuery: document.saveToBigQuery,
   updatedAt: document.updatedAt,
 });
 
@@ -135,6 +155,8 @@ const defaultSettings = (): ProviderSettingsDocument => {
     _id: PROVIDER_SETTINGS_ID,
     mistral: { ...MISTRAL_DEFAULTS },
     openai: { ...OPENAI_DEFAULTS },
+    saveToSheets: true,
+    saveToBigQuery: true,
     createdAt: now,
     updatedAt: now,
   };
@@ -172,6 +194,8 @@ export const saveProviderSettings = async (input: unknown): Promise<ProviderSett
     updatedAt: now,
     mistral: normalized.mistral,
     openai: normalized.openai,
+    saveToSheets: normalized.saveToSheets,
+    saveToBigQuery: normalized.saveToBigQuery,
   };
 
   await collection.replaceOne({ _id: PROVIDER_SETTINGS_ID }, nextDocument, { upsert: true });
@@ -209,5 +233,13 @@ export const getRuntimeProviderConfig = async (provider: AiProvider): Promise<Pr
       ocr: selected.ocrModel,
       transcribe: selected.transcribeModel,
     },
+  };
+};
+
+export const getStorageSettings = async (): Promise<StorageSettings> => {
+  const settings = await getProviderSettings();
+  return {
+    saveToSheets: settings.saveToSheets,
+    saveToBigQuery: settings.saveToBigQuery,
   };
 };

@@ -26,3 +26,4 @@ yarn-error.log*
 backend-start.log
 node_modules
 dist
+kossip-helpers.json

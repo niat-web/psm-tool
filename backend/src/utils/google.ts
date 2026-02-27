@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { google } from "googleapis";
-import { GSHEET_ID, getServiceAccountCredentials } from "../config";
+import { GSHEET_ID, getSheetsServiceAccountCredentials } from "../config";
 import { ensureDir } from "./fs";
 import type { JobProgress } from "./jobManager";
 
@@ -13,7 +13,7 @@ const DEFAULT_SHEETS_SCOPES = [
 const DEFAULT_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"];
 
 const getAuthClient = (scopes: string[]) => {
-  const credentials = getServiceAccountCredentials();
+  const credentials = getSheetsServiceAccountCredentials();
   if (!credentials) {
     return null;
   }

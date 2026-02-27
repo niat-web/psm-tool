@@ -3,11 +3,12 @@ import path from "node:path";
 import AdmZip from "adm-zip";
 import { getCurriculumSnippet } from "../utils/curriculum";
 import { forceEnumFormat } from "../utils/enum";
+import { appendRowsToBigQuery } from "../utils/bigquery";
 import { appendRowsWithHeaders } from "../utils/google";
 import { aiChatJson, aiJsonAsArray, aiOcr } from "../utils/aiProvider";
-import { SHEET_NAMES } from "../config";
+import { BIGQUERY_TABLE_NAMES, SHEET_NAMES } from "../config";
 import type { AiProvider, AssessmentIndividualInput, AssessmentZipInput } from "../types";
-import { getRuntimeProviderConfig, type ProviderRuntimeConfig } from "./settingsService";
+import { getRuntimeProviderConfig, getStorageSettings, type ProviderRuntimeConfig } from "./settingsService";
 
 const INITIAL_QUESTION_EXTRACTION_PROMPT = `
 You are an Expert Technical Interview Data Extractor.
@@ -224,7 +225,7 @@ const toFinalAssessmentRow = (args: {
     sub_topic: forceEnumFormat(args.item.sub_topic ?? "N/A"),
     difficulty_level: forceEnumFormat(args.item.difficulty ?? "MEDIUM"),
     curriculum_coverage: forceEnumFormat(args.item.curriculum_coverage ?? "N/A"),
-    question_uid: randomUUID().replace(/-/g, ""),
+    question_uid: randomUUID(),
     assessment_date: args.assessmentDate,
     question_creation_datetime: nowDateTime(),
     product: args.product,
@@ -300,9 +301,10 @@ export const analyzeAssessmentIndividual = async (args: {
   provider: AiProvider;
   onStatus?: (message: string) => void;
   abortIfCancelled?: () => void;
-}): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean }> => {
+}): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean; savedToBigQuery: boolean }> => {
   args.abortIfCancelled?.();
   const runtime = await getRuntimeProviderConfig(args.provider);
+  const storageSettings = await getStorageSettings();
   args.onStatus?.("Loading curriculum context...");
   const curriculumContext = await getCurriculumSnippet(15000);
   args.abortIfCancelled?.();
@@ -337,14 +339,30 @@ export const analyzeAssessmentIndividual = async (args: {
 
   const orderedRows = orderRows(finalRows);
   args.abortIfCancelled?.();
-  args.onStatus?.("Saving assessment results to sheet...");
-  const savedToSheet = await appendRowsWithHeaders({
-    sheetName: SHEET_NAMES.assessments,
-    headers: SHEET_HEADERS,
-    rows: orderedRows,
-  });
+  let savedToSheet = false;
+  if (storageSettings.saveToSheets) {
+    args.onStatus?.("Saving assessment results to sheet...");
+    savedToSheet = await appendRowsWithHeaders({
+      sheetName: SHEET_NAMES.assessments,
+      headers: SHEET_HEADERS,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("Sheet save is disabled in settings. Skipping sheet save.");
+  }
 
-  return { rows: orderedRows, savedToSheet };
+  let savedToBigQuery = false;
+  if (storageSettings.saveToBigQuery) {
+    args.onStatus?.("Saving assessment results to BigQuery...");
+    savedToBigQuery = await appendRowsToBigQuery({
+      tableName: BIGQUERY_TABLE_NAMES.assessments,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("BigQuery save is disabled in settings. Skipping BigQuery save.");
+  }
+
+  return { rows: orderedRows, savedToSheet, savedToBigQuery };
 };
 
 export const analyzeAssessmentZip = async (args: {
@@ -354,9 +372,10 @@ export const analyzeAssessmentZip = async (args: {
   provider: AiProvider;
   onStatus?: (message: string) => void;
   abortIfCancelled?: () => void;
-}): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean }> => {
+}): Promise<{ rows: Array<Record<string, string>>; savedToSheet: boolean; savedToBigQuery: boolean }> => {
   args.abortIfCancelled?.();
   const runtime = await getRuntimeProviderConfig(args.provider);
+  const storageSettings = await getStorageSettings();
   args.onStatus?.("Loading curriculum context...");
   const curriculumContext = await getCurriculumSnippet(15000);
   args.abortIfCancelled?.();
@@ -404,12 +423,28 @@ export const analyzeAssessmentZip = async (args: {
 
   const orderedRows = orderRows(finalRows);
   args.abortIfCancelled?.();
-  args.onStatus?.("Saving assessment results to sheet...");
-  const savedToSheet = await appendRowsWithHeaders({
-    sheetName: SHEET_NAMES.assessments,
-    headers: SHEET_HEADERS,
-    rows: orderedRows,
-  });
+  let savedToSheet = false;
+  if (storageSettings.saveToSheets) {
+    args.onStatus?.("Saving assessment results to sheet...");
+    savedToSheet = await appendRowsWithHeaders({
+      sheetName: SHEET_NAMES.assessments,
+      headers: SHEET_HEADERS,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("Sheet save is disabled in settings. Skipping sheet save.");
+  }
 
-  return { rows: orderedRows, savedToSheet };
+  let savedToBigQuery = false;
+  if (storageSettings.saveToBigQuery) {
+    args.onStatus?.("Saving assessment results to BigQuery...");
+    savedToBigQuery = await appendRowsToBigQuery({
+      tableName: BIGQUERY_TABLE_NAMES.assessments,
+      rows: orderedRows,
+    });
+  } else {
+    args.onStatus?.("BigQuery save is disabled in settings. Skipping BigQuery save.");
+  }
+
+  return { rows: orderedRows, savedToSheet, savedToBigQuery };
 };
